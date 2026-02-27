@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   IDEAL_ROOM_CAPACITY,
   MAX_ROOM_CAPACITY,
@@ -20,10 +20,72 @@ const SUBJECTS: Array<{ key: LeveledSubject; label: string }> = [
 
 const GRADES: AdminGrade[] = [10, 11, 12];
 
-function toInt(value: string, fallback: number) {
-  const n = Number.parseInt(value, 10);
-  if (!Number.isFinite(n)) return fallback;
-  return n;
+function clamp(value: number, min: number, max?: number) {
+  const lower = Math.max(min, value);
+  if (max === undefined) return lower;
+  return Math.min(max, lower);
+}
+
+function NumericInput({
+  value,
+  min,
+  max,
+  step = 1,
+  disabled,
+  onCommit,
+}: {
+  value: number;
+  min: number;
+  max?: number;
+  step?: number;
+  disabled?: boolean;
+  onCommit: (value: number) => void;
+}) {
+  const [text, setText] = useState(String(value));
+
+  useEffect(() => {
+    setText(String(value));
+  }, [value]);
+
+  const commit = () => {
+    if (text.trim() === "") {
+      setText(String(value));
+      return;
+    }
+    const parsed = Number.parseInt(text, 10);
+    if (!Number.isFinite(parsed)) {
+      setText(String(value));
+      return;
+    }
+    const next = clamp(parsed, min, max);
+    onCommit(next);
+    setText(String(next));
+  };
+
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={text}
+      disabled={disabled}
+      onChange={(event) => {
+        const next = event.target.value;
+        setText(next);
+        if (next.trim() === "") return;
+        const parsed = Number.parseInt(next, 10);
+        if (!Number.isFinite(parsed)) return;
+        onCommit(clamp(parsed, min, max));
+      }}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          (event.currentTarget as HTMLInputElement).blur();
+        }
+      }}
+    />
+  );
 }
 
 export function AdminApp() {
@@ -36,37 +98,37 @@ export function AdminApp() {
   const schedulerHref = base;
   const schedulerV6Href = `${base}Tracks-scheduler1/`;
 
-  const setRoomCount = (value: string) => {
+  const setRoomCount = (value: number) => {
     setDraft((prev) => ({
       ...prev,
-      roomCount: Math.max(1, toInt(value, prev.roomCount)),
+      roomCount: value,
     }));
   };
 
-  const setGradeTotal = (grade: AdminGrade, value: string) => {
+  const setGradeTotal = (grade: AdminGrade, value: number) => {
     setDraft((prev) => ({
       ...prev,
       gradeTotals: {
         ...prev.gradeTotals,
-        [grade]: Math.max(0, toInt(value, prev.gradeTotals[grade])),
+        [grade]: value,
       },
     }));
   };
 
-  const setDoneRate = (subject: "qudrat" | "esl", grade: AdminGrade, value: string) => {
+  const setDoneRate = (subject: "qudrat" | "esl", grade: AdminGrade, value: number) => {
     setDraft((prev) => ({
       ...prev,
       doneRates: {
         ...prev.doneRates,
         [subject]: {
           ...prev.doneRates[subject],
-          [grade]: Math.max(0, Math.min(100, toInt(value, prev.doneRates[subject][grade]))),
+          [grade]: value,
         },
       },
     }));
   };
 
-  const setDistribution = (subject: LeveledSubject, grade: AdminGrade, field: "L1" | "L2" | "L3", value: string) => {
+  const setDistribution = (subject: LeveledSubject, grade: AdminGrade, field: "L1" | "L2" | "L3", value: number) => {
     setDraft((prev) => ({
       ...prev,
       subjectDistributions: {
@@ -75,7 +137,7 @@ export function AdminApp() {
           ...prev.subjectDistributions[subject],
           [grade]: {
             ...prev.subjectDistributions[subject][grade],
-            [field]: Math.max(0, Math.min(100, toInt(value, prev.subjectDistributions[subject][grade][field]))),
+            [field]: value,
           },
         },
       },
@@ -117,7 +179,7 @@ export function AdminApp() {
         <div className="admin-grid-two">
           <label>
             Rooms on campus
-            <input type="number" min={1} step={1} value={draft.roomCount} onChange={(event) => setRoomCount(event.target.value)} />
+            <NumericInput min={1} step={1} value={draft.roomCount} onCommit={setRoomCount} />
           </label>
         </div>
 
@@ -126,7 +188,7 @@ export function AdminApp() {
           {GRADES.map((grade) => (
             <label key={grade}>
               Grade {grade}
-              <input type="number" min={0} step={1} value={draft.gradeTotals[grade]} onChange={(event) => setGradeTotal(grade, event.target.value)} />
+              <NumericInput min={0} step={1} value={draft.gradeTotals[grade]} onCommit={(value) => setGradeTotal(grade, value)} />
             </label>
           ))}
         </div>
@@ -150,14 +212,13 @@ export function AdminApp() {
               <td>Done with Qudrat</td>
               {GRADES.map((grade) => (
                 <td key={`done-qudrat-${grade}`}>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={0}
                     max={100}
                     step={1}
                     value={draft.doneRates.qudrat[grade]}
                     disabled={grade === 10}
-                    onChange={(event) => setDoneRate("qudrat", grade, event.target.value)}
+                    onCommit={(value) => setDoneRate("qudrat", grade, value)}
                   />
                 </td>
               ))}
@@ -166,14 +227,13 @@ export function AdminApp() {
               <td>Done with ESL</td>
               {GRADES.map((grade) => (
                 <td key={`done-esl-${grade}`}>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={0}
                     max={100}
                     step={1}
                     value={draft.doneRates.esl[grade]}
                     disabled={grade === 10}
-                    onChange={(event) => setDoneRate("esl", grade, event.target.value)}
+                    onCommit={(value) => setDoneRate("esl", grade, value)}
                   />
                 </td>
               ))}
@@ -207,13 +267,13 @@ export function AdminApp() {
                     <tr key={`${subject.key}-${grade}`}>
                       <td>Grade {grade}</td>
                       <td>
-                        <input type="number" min={0} max={100} step={1} value={row.L1} onChange={(event) => setDistribution(subject.key, grade, "L1", event.target.value)} />
+                        <NumericInput min={0} max={100} step={1} value={row.L1} onCommit={(value) => setDistribution(subject.key, grade, "L1", value)} />
                       </td>
                       <td>
-                        <input type="number" min={0} max={100} step={1} value={row.L2} onChange={(event) => setDistribution(subject.key, grade, "L2", event.target.value)} />
+                        <NumericInput min={0} max={100} step={1} value={row.L2} onCommit={(value) => setDistribution(subject.key, grade, "L2", value)} />
                       </td>
                       <td>
-                        <input type="number" min={0} max={100} step={1} value={row.L3} onChange={(event) => setDistribution(subject.key, grade, "L3", event.target.value)} />
+                        <NumericInput min={0} max={100} step={1} value={row.L3} onCommit={(value) => setDistribution(subject.key, grade, "L3", value)} />
                       </td>
                       <td className={sum === 100 ? "ok" : "bad"}>{sum}%</td>
                     </tr>
