@@ -316,10 +316,34 @@ export function buildRoomMapPreview(
     }
   }
 
+  const overflowFor = (level: Level, rooms: number) => Math.max(0, remap.effective[level] - rooms * 22);
+
   while (targetRooms > hostCandidates.length) {
     const reducible = levelsRunning
       .filter((level) => roomsNeeded[level] > 1)
-      .sort((a, b) => remap.effective[a] - remap.effective[b])[0];
+      .sort((a, b) => {
+        const aCurrentRooms = roomsNeeded[a];
+        const bCurrentRooms = roomsNeeded[b];
+
+        const aOverflowBefore = overflowFor(a, aCurrentRooms);
+        const bOverflowBefore = overflowFor(b, bCurrentRooms);
+        const aOverflowAfter = overflowFor(a, aCurrentRooms - 1);
+        const bOverflowAfter = overflowFor(b, bCurrentRooms - 1);
+
+        const aPenalty = aOverflowAfter - aOverflowBefore;
+        const bPenalty = bOverflowAfter - bOverflowBefore;
+        if (aPenalty !== bPenalty) return aPenalty - bPenalty;
+
+        if (aOverflowAfter !== bOverflowAfter) return aOverflowAfter - bOverflowAfter;
+
+        const aSpareAfter = (aCurrentRooms - 1) * 22 - remap.effective[a];
+        const bSpareAfter = (bCurrentRooms - 1) * 22 - remap.effective[b];
+        if (aSpareAfter !== bSpareAfter) return bSpareAfter - aSpareAfter;
+
+        if (aCurrentRooms !== bCurrentRooms) return bCurrentRooms - aCurrentRooms;
+
+        return remap.effective[a] - remap.effective[b];
+      })[0];
     if (!reducible) break;
     roomsNeeded[reducible] -= 1;
     targetRooms -= 1;
