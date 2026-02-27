@@ -24,7 +24,7 @@ import {
   type RoomHost,
   type SubjectRoutingPlan,
 } from "./domain/plannerV6";
-import { courseLabel } from "./domain/rules";
+import { courseLabel, courseMatchesStudent } from "./domain/rules";
 import type {
   Assignments,
   Course,
@@ -812,6 +812,7 @@ export default function AppV6() {
     const flags: string[] = [];
     const seen = new Set<string>();
     const roomCapacity = HOMEROOMS[selectedRoom].capacity;
+    const roomPrepG12Students = students.filter((student) => student.homeroom === selectedRoom && student.grade === 12 && !student.doneQ);
 
     for (const day of DAYS) {
       for (const slot of SLOTS) {
@@ -837,11 +838,62 @@ export default function AppV6() {
             flags.push(line);
           }
         }
+
+        if (SUBJECTS[course.subject].tahsili && roomPrepG12Students.length > 0) {
+          const qudratCoursesInSlot = HOMEROOMS
+            .map((room) => {
+              const candidateId = getAssignment(assignments, room.id, day, slot.id);
+              if (!candidateId) return null;
+              const candidate = getCourse(candidateId);
+              if (!candidate || SUBJECTS[candidate.subject].qudrat !== true) return null;
+              return candidate;
+            })
+            .filter(Boolean) as Course[];
+
+          if (qudratCoursesInSlot.length > 0) {
+            const subjectsInSlot = Array.from(new Set(qudratCoursesInSlot.map((entry) => entry.subject))).filter(
+              (entry): entry is "kammi" | "lafthi" => entry === "kammi" || entry === "lafthi"
+            );
+            const unmetByNeed = new Map<string, number>();
+            let unmetGeneric = 0;
+
+            for (const student of roomPrepG12Students) {
+              const hasQudratOption = qudratCoursesInSlot.some((candidate) => courseMatchesStudent(candidate, student));
+              if (hasQudratOption) continue;
+
+              if (subjectsInSlot.length === 1) {
+                const qSubject = subjectsInSlot[0];
+                const qLevel = student.needs[qSubject];
+                const key = `${qSubject}|${qLevel}`;
+                unmetByNeed.set(key, (unmetByNeed.get(key) || 0) + 1);
+              } else {
+                unmetGeneric += 1;
+              }
+            }
+
+            unmetByNeed.forEach((count, key) => {
+              const [qSubject, qLevel] = key.split("|");
+              const line = `${count} students need ${subjectLabel(qSubject as SubjectKey)} ${qLevel} on ${dayLabel(day)} · ${t.slot} ${slot.id}, but no matching section is running.`;
+              if (!seen.has(line)) {
+                seen.add(line);
+                flags.push(line);
+              }
+            });
+
+            if (unmetGeneric > 0) {
+              const line = `${unmetGeneric} students need Qudrat on ${dayLabel(day)} · ${t.slot} ${slot.id}, but no matching section is running.`;
+              if (!seen.has(line)) {
+                seen.add(line);
+                flags.push(line);
+              }
+            }
+          }
+        }
       }
     }
 
     return flags;
-  }, [campusWhitelist, assignments, selectedRoom, getCourse, computeMovementForCell, lang, fmt]);
+  }, [campusWhitelist, assignments, selectedRoom, getCourse, computeMovementForCell, lang, fmt, students, subjectLabel, dayLabel, t.slot]);
 
   const openManualMoveModal = useCallback(
     (studentId: string) => {

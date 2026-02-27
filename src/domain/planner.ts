@@ -274,16 +274,6 @@ export function computeMovement(
     if (!inThisRoom(student)) continue;
 
     if (subject.tahsili && student.grade === 12 && !student.doneQ) {
-      const qudratCoursesInSlot = homerooms
-        .map((room) => {
-          const candidateId = getAssignment(assignments, room.id, day, slotId);
-          if (!candidateId) return null;
-          const candidate = courses.find((entry) => entry.id === candidateId);
-          if (!candidate || SUBJECTS[candidate.subject].qudrat !== true) return null;
-          return candidate;
-        })
-        .filter(Boolean) as Course[];
-
       const slotHasQudratSupply = homerooms.some((room) => {
         const candidateId = getAssignment(assignments, room.id, day, slotId);
         if (!candidateId) return false;
@@ -307,17 +297,9 @@ export function computeMovement(
           resolved: moveResolutions?.[student.id]?.[blockKey],
         });
       } else {
-        const uniqueQudratSubjects = Array.from(new Set(qudratCoursesInSlot.map((entry) => entry.subject))).filter(
-          (entry): entry is "kammi" | "lafthi" => entry === "kammi" || entry === "lafthi"
-        );
-        if (uniqueQudratSubjects.length === 1) {
-          const qSubject = uniqueQudratSubjects[0];
-          const qLevel = student.needs[qSubject];
-          const qSubjectLabel = getSubjectLabelFromT(t, qSubject);
-          forcedStay.push({ ...student, reason: `${t.reasonNoSupply} (${qSubjectLabel} ${qLevel})` });
-        } else {
-          forcedStay.push({ ...student, reason: `${t.reasonNoSupply} (${t.qudratLabel})` });
-        }
+        // Keep the student in the current roster without marking as a forced-stay in this Tahsili cell.
+        // Missing Qudrat supply/level is surfaced via top-level flags instead of per-cell status.
+        aligned.push(student);
       }
       continue;
     }
