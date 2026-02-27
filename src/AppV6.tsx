@@ -4,6 +4,7 @@ import { buildHomerooms, getRuntimeAdminConfig } from "./domain/adminConfig";
 import { buildStreamGroups, genCourses, genStudents } from "./domain/data";
 import { formatDayPattern, getDayLabel, getSubjectLabelFromT, getT, localizePersonName, localizeRoomName, localizeSegment } from "./domain/i18n";
 import {
+  autoResolveMustMoves,
   buildCampusWhitelist,
   clearCourseMeetingsForRoom,
   computeMovement,
@@ -234,7 +235,6 @@ export default function AppV6() {
   const applyCampusPlan = useCallback(() => {
     const whitelist = new Set(computedWhitelist);
     setCampusWhitelist(whitelist);
-    setMoveResolutions({});
 
     const next: Assignments = {};
 
@@ -304,9 +304,11 @@ export default function AppV6() {
     }
 
     setStep2Conflicts(conflicts);
+    const autoResolvedMoves = autoResolveMustMoves(next, courses, students, whitelist, t, HOMEROOMS);
+    setMoveResolutions(autoResolvedMoves);
     setAssignments(next);
     setPage("homeroom");
-  }, [computedWhitelist, selectedStreams, subjectPreviews, gradeCourseSelections, courses]);
+  }, [computedWhitelist, selectedStreams, subjectPreviews, gradeCourseSelections, courses, students, t]);
 
   const toggleRunLevel = useCallback((subject: LeveledSubject, level: Level) => {
     const willRun = !routingPlans[subject].run[level];

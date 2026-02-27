@@ -387,6 +387,56 @@ export function unresolvedMoves(
   return Array.from(byKey.values());
 }
 
+export function autoResolveMustMoves(
+  assignments: Assignments,
+  courses: Course[],
+  students: Student[],
+  whitelist: Set<string> | null,
+  t: Translations,
+  homerooms: Homeroom[]
+) {
+  const resolutions: MoveResolutions = {};
+  const pending = unresolvedMoves(assignments, courses, students, resolutions, whitelist, t, homerooms).sort((a, b) => {
+    if (a.blockKey !== b.blockKey) return a.blockKey.localeCompare(b.blockKey);
+    if (a.fromRoom !== b.fromRoom) return a.fromRoom - b.fromRoom;
+    return a.id.localeCompare(b.id);
+  });
+
+  for (const move of pending) {
+    const existing = resolutions[move.id]?.[move.blockKey];
+    if (existing !== undefined && existing !== null) continue;
+
+    const bestOption = move.options
+      .slice()
+      .sort((a, b) => {
+        const roomA = homerooms.find((room) => room.id === a.roomId);
+        const roomB = homerooms.find((room) => room.id === b.roomId);
+
+        const capA = roomA?.capacity ?? 0;
+        const capB = roomB?.capacity ?? 0;
+
+        const currentA = effectiveRoomCountForBlock(students, resolutions, move.blockKey, a.roomId);
+        const currentB = effectiveRoomCountForBlock(students, resolutions, move.blockKey, b.roomId);
+
+        const remainingA = capA - currentA;
+        const remainingB = capB - currentB;
+
+        if (remainingB !== remainingA) return remainingB - remainingA;
+        if (currentA !== currentB) return currentA - currentB;
+        return a.roomId - b.roomId;
+      })[0];
+
+    if (!bestOption) continue;
+
+    resolutions[move.id] = {
+      ...(resolutions[move.id] || {}),
+      [move.blockKey]: bestOption.roomId,
+    };
+  }
+
+  return resolutions;
+}
+
 export function scheduleStats(assignments: Assignments, unresolvedCount: number, homerooms: Homeroom[]) {
   let total = 0;
   let filled = 0;
