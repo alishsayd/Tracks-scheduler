@@ -19,11 +19,10 @@ import {
   autoAssignTahsiliForQudrat,
   buildRoomMapPreview,
   buildStep0DemandBySubject,
-  levelOpenFromPolicies,
-  levelsForPolicy,
-  policyLabel,
+  createDefaultSubjectRoutingPlan,
+  levelOpenFromRouting,
   type RoomHost,
-  type SacrificePolicy,
+  type SubjectRoutingPlan,
 } from "./domain/plannerV6";
 import { courseLabel } from "./domain/rules";
 import type {
@@ -50,6 +49,22 @@ const LEVELED_SUBJECTS = ["lafthi", "kammi", "esl"] as const;
 
 function cx(...parts: Array<string | boolean | null | undefined>) {
   return parts.filter(Boolean).join(" ");
+}
+
+function defaultRoutingPlans(): Record<LeveledSubject, SubjectRoutingPlan> {
+  return {
+    kammi: createDefaultSubjectRoutingPlan(),
+    lafthi: createDefaultSubjectRoutingPlan(),
+    esl: createDefaultSubjectRoutingPlan(),
+  };
+}
+
+function defaultForceMovePanels() {
+  return {
+    kammi: { L1: false, L2: false, L3: false },
+    lafthi: { L1: false, L2: false, L3: false },
+    esl: { L1: false, L2: false, L3: false },
+  };
 }
 
 interface ConflictFlag {
@@ -88,11 +103,8 @@ export default function AppV6() {
   const [showProfile, setShowProfile] = useState(true);
 
   const [selectedStreams, setSelectedStreams] = useState<SelectedStreams>({});
-  const [sacrificePolicies, setSacrificePolicies] = useState<Record<LeveledSubject, SacrificePolicy | null>>({
-    kammi: null,
-    lafthi: null,
-    esl: null,
-  });
+  const [routingPlans, setRoutingPlans] = useState<Record<LeveledSubject, SubjectRoutingPlan>>(() => defaultRoutingPlans());
+  const [forceMovePanels, setForceMovePanels] = useState(defaultForceMovePanels);
   const [hostOverrides, setHostOverrides] = useState<Record<LeveledSubject, Partial<Record<number, RoomHost>>>>({
     kammi: {},
     lafthi: {},
@@ -105,42 +117,38 @@ export default function AppV6() {
 
   const getCourse = useCallback((courseId: string) => courses.find((course) => course.id === courseId), [courses]);
 
-  const resolvedPolicies = useMemo(
-    () => ({
-      kammi: sacrificePolicies.kammi ?? "run_all",
-      lafthi: sacrificePolicies.lafthi ?? "run_all",
-      esl: sacrificePolicies.esl ?? "run_all",
-    }),
-    [sacrificePolicies]
-  );
-
-  const policyLevelOpen = useMemo(() => levelOpenFromPolicies(resolvedPolicies), [resolvedPolicies]);
+  const policyLevelOpen = useMemo(() => levelOpenFromRouting(routingPlans), [routingPlans]);
 
   const computedWhitelist = useMemo(
     () => buildCampusWhitelist(selectedStreams, gradeCourseSelections, policyLevelOpen, STREAM_GROUPS),
     [selectedStreams, gradeCourseSelections, policyLevelOpen]
   );
 
-  const step0Complete = useMemo(() => LEVELED_SUBJECTS.every((subject) => Boolean(sacrificePolicies[subject])), [sacrificePolicies]);
+  const step0Complete = useMemo(
+    () => LEVELED_SUBJECTS.every((subject) => LEVELS.some((level) => routingPlans[subject].run[level])),
+    [routingPlans]
+  );
 
-  const step0ReadySubjectCount = useMemo(() => LEVELED_SUBJECTS.filter((subject) => Boolean(sacrificePolicies[subject])).length, [sacrificePolicies]);
+  const step0ReadySubjectCount = useMemo(
+    () => LEVELED_SUBJECTS.filter((subject) => LEVELS.some((level) => routingPlans[subject].run[level])).length,
+    [routingPlans]
+  );
 
-  const step0DemandBySubject = useMemo(() => buildStep0DemandBySubject(students, resolvedPolicies), [students, resolvedPolicies]);
+  const step0DemandBySubject = useMemo(() => buildStep0DemandBySubject(students, routingPlans), [students, routingPlans]);
 
   const subjectPreviews = useMemo(() => {
     const previews: Partial<Record<LeveledSubject, ReturnType<typeof buildRoomMapPreview>>> = {};
 
     for (const subject of LEVELED_SUBJECTS) {
       const streamId = selectedStreams[subject];
-      const policy = sacrificePolicies[subject];
-      if (!streamId || !policy) continue;
+      if (!streamId) continue;
       const group = STREAM_GROUPS.find((entry) => entry.id === streamId);
       if (!group) continue;
-      previews[subject] = buildRoomMapPreview(subject, group, policy, students, HOMEROOMS, hostOverrides[subject]);
+      previews[subject] = buildRoomMapPreview(subject, group, routingPlans[subject], students, HOMEROOMS, hostOverrides[subject]);
     }
 
     return previews;
-  }, [selectedStreams, sacrificePolicies, students, hostOverrides]);
+  }, [selectedStreams, routingPlans, students, hostOverrides]);
 
   const selectedStreamCount = useMemo(() => LEVELED_SUBJECTS.filter((subject) => Boolean(selectedStreams[subject])).length, [selectedStreams]);
 
@@ -220,8 +228,7 @@ export default function AppV6() {
     for (const subject of LEVELED_SUBJECTS) {
       const streamGroupId = selectedStreams[subject];
       const preview = subjectPreviews[subject];
-      const policy = sacrificePolicies[subject];
-      if (!streamGroupId || !preview || !policy) continue;
+      if (!streamGroupId || !preview) continue;
 
       const group = STREAM_GROUPS.find((entry) => entry.id === streamGroupId);
       if (!group) continue;
@@ -229,7 +236,7 @@ export default function AppV6() {
       const levelToCourse: Partial<Record<Level, string>> = {};
       for (const course of group.courses) {
         if (!course.level) continue;
-        if (!levelsForPolicy(policy).includes(course.level)) continue;
+        if (!preview.levelsRunning.includes(course.level)) continue;
         levelToCourse[course.level] = course.id;
       }
 
@@ -286,11 +293,80 @@ export default function AppV6() {
     setStep2Conflicts(conflicts);
     setAssignments(next);
     setPage("homeroom");
-  }, [computedWhitelist, selectedStreams, subjectPreviews, sacrificePolicies, gradeCourseSelections, courses]);
+  }, [computedWhitelist, selectedStreams, subjectPreviews, gradeCourseSelections, courses]);
 
-  const setPolicy = useCallback((subject: LeveledSubject, policy: SacrificePolicy) => {
-    setSacrificePolicies((prev) => ({ ...prev, [subject]: policy }));
+  const toggleRunLevel = useCallback((subject: LeveledSubject, level: Level) => {
+    setRoutingPlans((prev) => ({
+      ...prev,
+      [subject]: {
+        ...prev[subject],
+        run: {
+          ...prev[subject].run,
+          [level]: !prev[subject].run[level],
+        },
+      },
+    }));
     setHostOverrides((prev) => ({ ...prev, [subject]: {} }));
+  }, []);
+
+  const toggleForceMovePanel = useCallback((subject: LeveledSubject, level: Level) => {
+    setForceMovePanels((prev) => ({
+      ...prev,
+      [subject]: {
+        ...prev[subject],
+        [level]: !prev[subject][level],
+      },
+    }));
+  }, []);
+
+  const setSingleForceMoveTarget = useCallback((subject: LeveledSubject, source: "L1" | "L3", target: Level) => {
+    setRoutingPlans((prev) => ({
+      ...prev,
+      [subject]: {
+        ...prev[subject],
+        forceMove: {
+          ...prev[subject].forceMove,
+          [source]: {
+            ...prev[subject].forceMove[source],
+            target,
+          },
+        },
+      },
+    }));
+  }, []);
+
+  const setSingleForceMoveCount = useCallback((subject: LeveledSubject, source: "L1" | "L3", value: string) => {
+    const count = Number.parseInt(value, 10);
+    setRoutingPlans((prev) => ({
+      ...prev,
+      [subject]: {
+        ...prev[subject],
+        forceMove: {
+          ...prev[subject].forceMove,
+          [source]: {
+            ...prev[subject].forceMove[source],
+            count: Number.isFinite(count) ? Math.max(0, count) : 0,
+          },
+        },
+      },
+    }));
+  }, []);
+
+  const setSplitForceMoveCount = useCallback((subject: LeveledSubject, key: "toL1" | "toL3", value: string) => {
+    const count = Number.parseInt(value, 10);
+    setRoutingPlans((prev) => ({
+      ...prev,
+      [subject]: {
+        ...prev[subject],
+        forceMove: {
+          ...prev[subject].forceMove,
+          L2: {
+            ...prev[subject].forceMove.L2,
+            [key]: Number.isFinite(count) ? Math.max(0, count) : 0,
+          },
+        },
+      },
+    }));
   }, []);
 
   const pickStream = useCallback((subject: LeveledSubject, streamGroupId: string) => {
@@ -464,11 +540,10 @@ export default function AppV6() {
                   <div style={{ overflowX: "auto" }}>
                     <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
                       <colgroup>
-                        <col style={{ width: "34%" }} />
-                        <col style={{ width: "11%" }} />
-                        <col style={{ width: "11%" }} />
-                        <col style={{ width: "11%" }} />
-                        <col style={{ width: "33%" }} />
+                        <col style={{ width: "28%" }} />
+                        <col style={{ width: "24%" }} />
+                        <col style={{ width: "24%" }} />
+                        <col style={{ width: "24%" }} />
                       </colgroup>
                       <thead>
                         <tr>
@@ -478,51 +553,125 @@ export default function AppV6() {
                           <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L1</th>
                           <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L2</th>
                           <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L3</th>
-                          <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>
-                            Level Remap
-                          </th>
                         </tr>
                       </thead>
                       <tbody>
                         {LEVELED_SUBJECTS.map((subject, index) => {
                           const demand = step0DemandBySubject[subject];
                           const subjectDef = SUBJECTS[subject];
-                          const selectedPolicy = sacrificePolicies[subject];
+                          const routing = routingPlans[subject];
+                          const forcePanels = forceMovePanels[subject];
                           return (
                             <tr key={subject} style={{ background: index % 2 ? "#FAFAF7" : "#fff" }}>
-                              <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", whiteSpace: "nowrap" }}>
+                              <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", whiteSpace: "nowrap", verticalAlign: "top" }}>
                                 <div className="step0-subject-cell">
                                   <span style={{ fontSize: 12, fontWeight: 900, color: subjectDef.color }}>{subjectLabel(subject)}</span>
-                                  <span className={cx("level-action-count", selectedPolicy && "ok")}>
-                                    {selectedPolicy ? policyLabel(selectedPolicy) : "Choose policy"}
+                                  <span className={cx("level-action-count", LEVELS.some((level) => routing.run[level]) && "ok")}>
+                                    {LEVELS.filter((level) => routing.run[level]).length}/{LEVELS.length} levels running
                                   </span>
+                                </div>
+                                <div style={{ marginTop: 8, fontSize: 11, color: "#6B665F" }}>
+                                  {demand.mergedCount} students force-moved
                                 </div>
                               </td>
                               {LEVELS.map((level) => {
+                                const run = routing.run[level];
+                                const baseCount = demand.base[level];
+                                const forceOpen = forcePanels[level];
+                                const source = routing.forceMove[level as "L1" | "L2" | "L3"];
+                                const remaining = (() => {
+                                  if (level === "L2") {
+                                    return Math.max(0, baseCount - routing.forceMove.L2.toL1 - routing.forceMove.L2.toL3);
+                                  }
+                                  return Math.max(0, baseCount - (source as { count: number }).count);
+                                })();
+
                                 return (
-                                  <td key={level} className="step0-level-cell">
-                                    <div className="step0-level-count">{demand.effective[level]}</div>
+                                  <td key={level} className="step0-level-cell" style={{ verticalAlign: "top", paddingBottom: 12 }}>
+                                    <div className="step0-level-count">{baseCount} students</div>
+                                    <button
+                                      type="button"
+                                      className={cx("level-toggle", "step0-level-toggle", run && "on")}
+                                      onClick={() => toggleRunLevel(subject, level)}
+                                    >
+                                      Run
+                                    </button>
+
+                                    <div style={{ marginTop: 8 }}>
+                                      <button
+                                        type="button"
+                                        className={cx("gcr-opt", forceOpen && "on")}
+                                        disabled={run}
+                                        onClick={() => toggleForceMovePanel(subject, level)}
+                                      >
+                                        {level === "L2" ? "Split" : "Force move"}
+                                      </button>
+                                    </div>
+
+                                    {!run && forceOpen && (
+                                      <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                                        {level === "L2" ? (
+                                          <>
+                                            <label style={{ fontSize: 11, color: "#6B665F" }}>
+                                              Move to L1
+                                              <input
+                                                type="number"
+                                                min={0}
+                                                max={baseCount}
+                                                value={routing.forceMove.L2.toL1}
+                                                onChange={(event) => setSplitForceMoveCount(subject, "toL1", event.target.value)}
+                                                style={{ marginTop: 4, width: "100%" }}
+                                              />
+                                            </label>
+                                            <label style={{ fontSize: 11, color: "#6B665F" }}>
+                                              Move to L3
+                                              <input
+                                                type="number"
+                                                min={0}
+                                                max={baseCount}
+                                                value={routing.forceMove.L2.toL3}
+                                                onChange={(event) => setSplitForceMoveCount(subject, "toL3", event.target.value)}
+                                                style={{ marginTop: 4, width: "100%" }}
+                                              />
+                                            </label>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <label style={{ fontSize: 11, color: "#6B665F" }}>
+                                              Destination
+                                              <select
+                                                value={routing.forceMove[level].target}
+                                                onChange={(event) => setSingleForceMoveTarget(subject, level as "L1" | "L3", event.target.value as Level)}
+                                                style={{ marginTop: 4, width: "100%" }}
+                                              >
+                                                {LEVELS.filter((target) => target !== level).map((target) => (
+                                                  <option key={`${subject}-${level}-${target}`} value={target}>
+                                                    {target}
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            </label>
+                                            <label style={{ fontSize: 11, color: "#6B665F" }}>
+                                              Students to move
+                                              <input
+                                                type="number"
+                                                min={0}
+                                                max={baseCount}
+                                                value={routing.forceMove[level].count}
+                                                onChange={(event) => setSingleForceMoveCount(subject, level as "L1" | "L3", event.target.value)}
+                                                style={{ marginTop: 4, width: "100%" }}
+                                              />
+                                            </label>
+                                          </>
+                                        )}
+                                        <span style={{ fontSize: 10, color: "#B45309", fontWeight: 700 }}>
+                                          {remaining} remain in {level} (forced stays)
+                                        </span>
+                                      </div>
+                                    )}
                                   </td>
                                 );
                               })}
-                              <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8" }}>
-                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                  {(["run_all", "merge_l3_to_l2", "merge_l1_to_l2", "merge_l2_to_l1", "merge_l2_to_l3"] as SacrificePolicy[]).map((policy) => (
-                                    <button
-                                      key={policy}
-                                      className={cx("gcr-opt", selectedPolicy === policy && "on")}
-                                      onClick={() => setPolicy(subject, policy)}
-                                    >
-                                      {policyLabel(policy)}
-                                    </button>
-                                  ))}
-                                </div>
-                                {demand.mergedCount > 0 ? (
-                                  <div style={{ marginTop: 6, fontSize: 11, color: "#B45309", fontWeight: 700 }}>
-                                    Merge impact: {demand.mergedCount} students remapped
-                                  </div>
-                                ) : null}
-                              </td>
                             </tr>
                           );
                         })}
@@ -532,11 +681,11 @@ export default function AppV6() {
 
                   <div className={cx("step-status", step0Complete && "ok")}>
                     {step0Complete
-                      ? "Step 0 complete. Demand + level remap policy set."
-                      : `Subjects with policy selected: ${step0ReadySubjectCount}/${LEVELED_SUBJECTS.length}`}
+                      ? "Step 0 complete. Run levels and force-move rules are set."
+                      : `Subjects with at least one running level: ${step0ReadySubjectCount}/${LEVELED_SUBJECTS.length}`}
                   </div>
                   <div style={{ marginTop: 10, fontSize: 11, color: "#6B665F" }}>
-                    Lead is remapping demand between levels (not force-moving specific students here). You can remap from L2 as well.
+                    Force move is only configurable when a level is not running.
                   </div>
                 </div>
 
@@ -552,7 +701,6 @@ export default function AppV6() {
                       const options = STREAM_GROUPS.filter((group) => group.subject === subject);
                       const pickedId = selectedStreams[subject];
                       const preview = subjectPreviews[subject];
-                      const policy = sacrificePolicies[subject];
                       const issues = step1Issues[subject];
 
                       return (
@@ -578,7 +726,7 @@ export default function AppV6() {
                                     {LEVELS.map((level) => {
                                       const course = group.levels.find((entry) => entry?.level === level);
                                       if (!course) return null;
-                                      const isOpen = policy ? levelsForPolicy(policy).includes(level) : true;
+                                      const isOpen = routingPlans[subject].run[level];
                                       return (
                                         <div key={level} className={cx("bundle-row", !isOpen && "closed")}>
                                           <span

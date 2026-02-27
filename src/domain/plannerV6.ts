@@ -1,8 +1,16 @@
 import { LEVELS, SUBJECTS } from "./constants";
 import type { Assignments, Course, Day, Homeroom, LeveledSubject, Level, StreamGroup, Student } from "./types";
 
-export type SacrificePolicy = "run_all" | "merge_l3_to_l2" | "merge_l1_to_l2" | "merge_l2_to_l1" | "merge_l2_to_l3";
 export type RoomHost = Level | "AUTO_TAHSILI";
+
+export interface SubjectRoutingPlan {
+  run: Record<Level, boolean>;
+  forceMove: {
+    L1: { target: Level; count: number };
+    L2: { toL1: number; toL3: number };
+    L3: { target: Level; count: number };
+  };
+}
 
 export interface Step0Demand {
   base: Record<Level, number>;
@@ -39,13 +47,6 @@ export interface RoomMapPreview {
   levelsRunning: Level[];
 }
 
-export interface SubjectBundlePlan {
-  subject: LeveledSubject;
-  streamGroupId: string;
-  policy: SacrificePolicy;
-  hostByRoom: Record<number, RoomHost>;
-}
-
 function emptyCounts(): Record<Level, number> {
   return { L1: 0, L2: 0, L3: 0 };
 }
@@ -54,60 +55,172 @@ function cloneCounts(input: Record<Level, number>): Record<Level, number> {
   return { L1: input.L1, L2: input.L2, L3: input.L3 };
 }
 
-export function policyLabel(policy: SacrificePolicy) {
-  if (policy === "merge_l3_to_l2") return "L3 -> L2";
-  if (policy === "merge_l1_to_l2") return "L1 -> L2";
-  if (policy === "merge_l2_to_l1") return "L2 -> L1";
-  if (policy === "merge_l2_to_l3") return "L2 -> L3";
-  return "Run L1 + L2 + L3";
+function clampInt(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, Math.round(value)));
 }
 
-export function levelAfterPolicy(level: Level, policy: SacrificePolicy): Level {
-  if (policy === "merge_l3_to_l2" && level === "L3") return "L2";
-  if (policy === "merge_l1_to_l2" && level === "L1") return "L2";
-  if (policy === "merge_l2_to_l1" && level === "L2") return "L1";
-  if (policy === "merge_l2_to_l3" && level === "L2") return "L3";
-  return level;
+function normalizeSingleTarget(source: Level, target: Level): Level {
+  if (target !== source) return target;
+  if (source === "L1") return "L2";
+  if (source === "L3") return "L2";
+  return "L1";
 }
 
-export function levelsForPolicy(policy: SacrificePolicy): Level[] {
-  if (policy === "merge_l3_to_l2") return ["L1", "L2"];
-  if (policy === "merge_l1_to_l2") return ["L2", "L3"];
-  if (policy === "merge_l2_to_l1") return ["L1", "L3"];
-  if (policy === "merge_l2_to_l3") return ["L1", "L3"];
-  return [...LEVELS];
+export function createDefaultSubjectRoutingPlan(): SubjectRoutingPlan {
+  return {
+    run: { L1: true, L2: true, L3: true },
+    forceMove: {
+      L1: { target: "L2", count: 0 },
+      L2: { toL1: 0, toL3: 0 },
+      L3: { target: "L2", count: 0 },
+    },
+  };
 }
 
-function subjectDemand(students: Student[], subject: LeveledSubject, policy: SacrificePolicy): Step0Demand {
-  const base = emptyCounts();
-  const effective = emptyCounts();
-  let mergedCount = 0;
+function runningLevels(plan: SubjectRoutingPlan): Level[] {
+  return LEVELS.filter((level) => plan.run[level]);
+}
 
+function normalizedPlan(plan: SubjectRoutingPlan): SubjectRoutingPlan {
+  return {
+    run: {
+      L1: Boolean(plan.run.L1),
+      L2: Boolean(plan.run.L2),
+      L3: Boolean(plan.run.L3),
+    },
+    forceMove: {
+      L1: {
+        target: normalizeSingleTarget("L1", plan.forceMove.L1.target),
+        count: clampInt(plan.forceMove.L1.count, 0, Number.MAX_SAFE_INTEGER),
+      },
+      L2: {
+        toL1: clampInt(plan.forceMove.L2.toL1, 0, Number.MAX_SAFE_INTEGER),
+        toL3: clampInt(plan.forceMove.L2.toL3, 0, Number.MAX_SAFE_INTEGER),
+      },
+      L3: {
+        target: normalizeSingleTarget("L3", plan.forceMove.L3.target),
+        count: clampInt(plan.forceMove.L3.count, 0, Number.MAX_SAFE_INTEGER),
+      },
+    },
+  };
+}
+
+function buildRemap(students: Student[], subject: LeveledSubject, planInput: SubjectRoutingPlan) {
+  const plan = normalizedPlan(planInput);
+
+  const grouped: Record<Level, Student[]> = { L1: [], L2: [], L3: [] };
   for (const student of students) {
     if (student.done[subject]) continue;
-    const needs = student.needs[subject];
-    const mapped = levelAfterPolicy(needs, policy);
-    base[needs] += 1;
-    effective[mapped] += 1;
-    if (mapped !== needs) mergedCount += 1;
+    grouped[student.needs[subject]].push(student);
+  }
+
+  for (const level of LEVELS) {
+    grouped[level].sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  const remappedLevelByStudent = new Map<string, Level>();
+  const base = emptyCounts();
+  const effective = emptyCounts();
+
+  for (const level of LEVELS) {
+    base[level] = grouped[level].length;
+  }
+
+  for (const level of LEVELS) {
+    const source = grouped[level];
+
+    if (plan.run[level]) {
+      for (const student of source) remappedLevelByStudent.set(student.id, level);
+      effective[level] += source.length;
+      continue;
+    }
+
+    if (level === "L2") {
+      const moveToL1 = clampInt(plan.forceMove.L2.toL1, 0, source.length);
+      const moveToL3 = clampInt(plan.forceMove.L2.toL3, 0, source.length - moveToL1);
+
+      for (let i = 0; i < source.length; i += 1) {
+        const student = source[i];
+        if (i < moveToL1) {
+          remappedLevelByStudent.set(student.id, "L1");
+          effective.L1 += 1;
+        } else if (i < moveToL1 + moveToL3) {
+          remappedLevelByStudent.set(student.id, "L3");
+          effective.L3 += 1;
+        } else {
+          remappedLevelByStudent.set(student.id, "L2");
+          effective.L2 += 1;
+        }
+      }
+      continue;
+    }
+
+    const target = level === "L1" ? plan.forceMove.L1.target : plan.forceMove.L3.target;
+    const count = level === "L1" ? plan.forceMove.L1.count : plan.forceMove.L3.count;
+    const normalizedTarget = normalizeSingleTarget(level, target);
+    const moveCount = clampInt(count, 0, source.length);
+
+    for (let i = 0; i < source.length; i += 1) {
+      const student = source[i];
+      if (i < moveCount) {
+        remappedLevelByStudent.set(student.id, normalizedTarget);
+        effective[normalizedTarget] += 1;
+      } else {
+        remappedLevelByStudent.set(student.id, level);
+        effective[level] += 1;
+      }
+    }
+  }
+
+  let moved = 0;
+  for (const student of students) {
+    if (student.done[subject]) continue;
+    const next = remappedLevelByStudent.get(student.id);
+    if (next && next !== student.needs[subject]) moved += 1;
   }
 
   return {
     base,
     effective,
-    mergedCount,
-    levelsRunning: levelsForPolicy(policy),
+    moved,
+    levelsRunning: runningLevels(plan),
+    remappedLevelByStudent,
   };
 }
 
 export function buildStep0DemandBySubject(
   students: Student[],
-  policies: Record<LeveledSubject, SacrificePolicy>
+  plans: Record<LeveledSubject, SubjectRoutingPlan>
 ): Record<LeveledSubject, Step0Demand> {
   return {
-    kammi: subjectDemand(students, "kammi", policies.kammi),
-    lafthi: subjectDemand(students, "lafthi", policies.lafthi),
-    esl: subjectDemand(students, "esl", policies.esl),
+    kammi: (() => {
+      const result = buildRemap(students, "kammi", plans.kammi);
+      return {
+        base: result.base,
+        effective: result.effective,
+        mergedCount: result.moved,
+        levelsRunning: result.levelsRunning,
+      };
+    })(),
+    lafthi: (() => {
+      const result = buildRemap(students, "lafthi", plans.lafthi);
+      return {
+        base: result.base,
+        effective: result.effective,
+        mergedCount: result.moved,
+        levelsRunning: result.levelsRunning,
+      };
+    })(),
+    esl: (() => {
+      const result = buildRemap(students, "esl", plans.esl);
+      return {
+        base: result.base,
+        effective: result.effective,
+        mergedCount: result.moved,
+        levelsRunning: result.levelsRunning,
+      };
+    })(),
   };
 }
 
@@ -168,20 +281,14 @@ export function autoAssignTahsiliForQudrat(
 export function buildRoomMapPreview(
   subject: LeveledSubject,
   streamGroup: StreamGroup,
-  policy: SacrificePolicy,
+  planInput: SubjectRoutingPlan,
   students: Student[],
   homerooms: Homeroom[],
   hostOverrides: Partial<Record<number, RoomHost>> = {}
 ): RoomMapPreview {
-  const levelsRunning = levelsForPolicy(policy);
+  const remap = buildRemap(students, subject, planInput);
+  const levelsRunning = remap.levelsRunning;
   const qudratSubject = SUBJECTS[subject].qudrat === true;
-
-  const baseDemand = emptyCounts();
-  for (const student of students) {
-    if (student.done[subject]) continue;
-    const lvl = levelAfterPolicy(student.needs[subject], policy);
-    baseDemand[lvl] += 1;
-  }
 
   const hostCandidates = homerooms.filter((room) => !(qudratSubject && room.grade === 12));
 
@@ -194,15 +301,17 @@ export function buildRoomMapPreview(
     const roomCounts = roomLevelCounts[student.homeroom];
     if (!roomCounts) continue;
     if (student.done[subject]) continue;
-    const lvl = levelAfterPolicy(student.needs[subject], policy);
-    roomCounts[lvl] += 1;
+
+    const mapped = remap.remappedLevelByStudent.get(student.id) ?? student.needs[subject];
+    roomCounts[mapped] += 1;
   }
 
   const roomsNeeded: Record<Level, number> = { L1: 0, L2: 0, L3: 0 };
   let targetRooms = 0;
   for (const level of levelsRunning) {
-    if (baseDemand[level] > 0) {
-      roomsNeeded[level] = Math.max(1, Math.ceil(baseDemand[level] / 22));
+    const demand = remap.effective[level];
+    if (demand > 0) {
+      roomsNeeded[level] = Math.max(1, Math.ceil(demand / 22));
       targetRooms += roomsNeeded[level];
     }
   }
@@ -210,7 +319,7 @@ export function buildRoomMapPreview(
   while (targetRooms > hostCandidates.length) {
     const reducible = levelsRunning
       .filter((level) => roomsNeeded[level] > 1)
-      .sort((a, b) => baseDemand[a] - baseDemand[b])[0];
+      .sort((a, b) => remap.effective[a] - remap.effective[b])[0];
     if (!reducible) break;
     roomsNeeded[reducible] -= 1;
     targetRooms -= 1;
@@ -219,7 +328,7 @@ export function buildRoomMapPreview(
   const assignedRooms = new Set<number>();
   const hostByRoom: Record<number, RoomHost> = {};
 
-  const levelOrder = [...levelsRunning].sort((a, b) => baseDemand[b] - baseDemand[a]);
+  const levelOrder = [...levelsRunning].sort((a, b) => remap.effective[b] - remap.effective[a]);
   for (const level of levelOrder) {
     for (let i = 0; i < roomsNeeded[level]; i += 1) {
       const best = pickBestRoom(hostCandidates, assignedRooms, roomLevelCounts, level);
@@ -273,9 +382,16 @@ export function buildRoomMapPreview(
       continue;
     }
 
-    const targetLevel = levelAfterPolicy(student.needs[subject], policy);
-    const homeHost = hostByRoom[student.homeroom];
+    const targetLevel = remap.remappedLevelByStudent.get(student.id) ?? student.needs[subject];
 
+    if (!levelsRunning.includes(targetLevel)) {
+      placements[student.id] = student.homeroom;
+      assignedCounts[student.homeroom] += 1;
+      forcedStays += 1;
+      continue;
+    }
+
+    const homeHost = hostByRoom[student.homeroom];
     if (homeHost === targetLevel) {
       placements[student.id] = student.homeroom;
       assignedCounts[student.homeroom] += 1;
@@ -350,12 +466,12 @@ export function buildRoomMapPreview(
     hostByRoom,
     rows,
     summary,
-    levelDemand: cloneCounts(baseDemand),
+    levelDemand: cloneCounts(remap.effective),
     levelsRunning,
   };
 }
 
-export function levelOpenFromPolicies(policies: Record<LeveledSubject, SacrificePolicy>) {
+export function levelOpenFromRouting(plans: Record<LeveledSubject, SubjectRoutingPlan>) {
   const defaultState = { L1: false, L2: false, L3: false };
   const result: Record<LeveledSubject, Record<Level, boolean>> = {
     kammi: { ...defaultState },
@@ -364,17 +480,10 @@ export function levelOpenFromPolicies(policies: Record<LeveledSubject, Sacrifice
   };
 
   (Object.keys(result) as LeveledSubject[]).forEach((subject) => {
-    const running = new Set(levelsForPolicy(policies[subject]));
     for (const level of LEVELS) {
-      result[subject][level] = running.has(level);
+      result[subject][level] = Boolean(plans[subject].run[level]);
     }
   });
 
   return result;
-}
-
-export function effectiveNeedLabel(level: Level, policy: SacrificePolicy) {
-  const mapped = levelAfterPolicy(level, policy);
-  if (mapped === level) return level;
-  return `${level} -> ${mapped}`;
 }
