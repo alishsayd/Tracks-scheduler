@@ -144,7 +144,7 @@ export default function AppV6() {
   const [gradeCourseSelections, setGradeCourseSelections] = useState<GradeCourseSelections>({});
   const [step2Conflicts, setStep2Conflicts] = useState<ConflictFlag[]>([]);
   const [campusWhitelist, setCampusWhitelist] = useState<Set<string> | null>(null);
-  const [revealedStep, setRevealedStep] = useState(0);
+  const [activeCampusStep, setActiveCampusStep] = useState<0 | 1 | 2>(0);
 
   const getCourse = useCallback((courseId: string) => courses.find((course) => course.id === courseId), [courses]);
 
@@ -381,15 +381,70 @@ export default function AppV6() {
   const step2Ready = step2Complete && !step2HardBlocked;
 
   const campusFlowComplete = step0Complete && step1Complete && step2Ready;
+  const g12DoneQCount = useMemo(() => students.filter((student) => student.grade === 12 && student.doneQ).length, [students]);
+  const hasStep1Progress = useMemo(() => LEVELED_SUBJECTS.some((subject) => Boolean(selectedStreams[subject])), [selectedStreams]);
+  const hasStep2Progress = useMemo(
+    () => Object.values(gradeCourseSelections).some((selection) => Object.values(selection || {}).some((courseId) => Boolean(courseId))),
+    [gradeCourseSelections]
+  );
 
   useEffect(() => {
-    setRevealedStep((prev) => {
-      let next = prev;
-      if (step0Complete) next = Math.max(next, 1);
-      if (step0Complete && step1Complete) next = Math.max(next, 2);
-      return next;
-    });
-  }, [step0Complete, step1Complete]);
+    if (!step0Complete && activeCampusStep !== 0) {
+      setActiveCampusStep(0);
+      return;
+    }
+    if (step0Complete && !step1Complete && activeCampusStep === 2) {
+      setActiveCampusStep(1);
+    }
+  }, [step0Complete, step1Complete, activeCampusStep]);
+
+  useEffect(() => {
+    if (page !== "campus") return;
+    const mainLeft = document.querySelector(".ml");
+    if (mainLeft instanceof HTMLElement) {
+      mainLeft.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [activeCampusStep, page]);
+
+  const resetFromStep0 = useCallback(() => {
+    setSelectedStreams({});
+    setHostOverrides({ kammi: {}, lafthi: {}, esl: {} });
+    setGradeCourseSelections({});
+    setStep2Conflicts([]);
+    setCampusWhitelist(null);
+    setAssignments({});
+    setMoveResolutions({});
+  }, []);
+
+  const resetFromStep1 = useCallback(() => {
+    setGradeCourseSelections({});
+    setStep2Conflicts([]);
+    setCampusWhitelist(null);
+    setAssignments({});
+    setMoveResolutions({});
+  }, []);
+
+  const jumpBackToStep = useCallback(
+    (target: 0 | 1) => {
+      if (target === 0) {
+        if ((hasStep1Progress || hasStep2Progress || campusWhitelist) && !window.confirm("Go back to Step 0? This clears Step 1 and Step 2 progress.")) {
+          return;
+        }
+        resetFromStep0();
+        setPage("campus");
+        setActiveCampusStep(0);
+        return;
+      }
+
+      if ((hasStep2Progress || campusWhitelist) && !window.confirm("Go back to Step 1? This clears Step 2 progress.")) {
+        return;
+      }
+      resetFromStep1();
+      setPage("campus");
+      setActiveCampusStep(1);
+    },
+    [hasStep1Progress, hasStep2Progress, campusWhitelist, resetFromStep0, resetFromStep1]
+  );
 
   const applyCampusPlan = useCallback(() => {
     if (step2BlockingIssues.length > 0) {
@@ -692,9 +747,9 @@ export default function AppV6() {
             </div>
           </div>
           <div className="pills">
-            <div className={cx("pill", stats.filled === stats.total ? "po" : "pd")}>{stats.filled}/{stats.total} {t.slots}</div>
-            <div className={cx("pill", stats.unresolved === 0 ? "po" : "pb")}>{stats.unresolved === 0 ? "✓" : stats.unresolved} {t.moves}</div>
-            {stats.done && <div className="pill pp">✓ {t.done}</div>}
+            <div className="topbar-stat">
+              {stats.filled}/{stats.total} {t.slots} · {stats.unresolved} {t.moves}
+            </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginInlineStart: 6 }}>
               <span style={{ fontSize: 11, color: "#94908A" }}>{t.language}</span>
               <div style={{ display: "inline-flex", border: "1px solid #E8E4DD", borderRadius: 999, overflow: "hidden" }}>
@@ -734,186 +789,208 @@ export default function AppV6() {
 
             {page === "campus" && (
               <>
-                <div className="card">
-                  <div className="card-t">
-                    Step 0 — Qudrat Status, Demand & Sacrifice
-                    <span className="meta">Required before bundle mapping.</span>
+                <div className="step-shell">
+                  <div className="step-shell-head">
+                    <span>Step {activeCampusStep + 1} of 3</span>
+                    <span className="step-shell-sub">Guided setup. Editing earlier steps clears later progress.</span>
                   </div>
-
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-                    <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, padding: "2px 6px", borderRadius: 4, background: "#DEF7EC", color: "#059669", fontWeight: 900 }}>
-                      G12 done with Qudrat: {students.filter((student) => student.grade === 12 && student.doneQ).length}
-                    </span>
-                    <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, padding: "2px 6px", borderRadius: 4, background: "#FEF3C7", color: "#B45309", fontWeight: 900 }}>
-                      G12 still preparing: {students.filter((student) => student.grade === 12 && !student.doneQ).length}
-                    </span>
-                    <span style={{ fontSize: 11, color: "#94908A", alignSelf: "center" }}>Qudrat done students are excluded from Kammi/Lafthi demand.</span>
-                  </div>
-
-                  <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
-                      <colgroup>
-                        <col style={{ width: "28%" }} />
-                        <col style={{ width: "24%" }} />
-                        <col style={{ width: "24%" }} />
-                        <col style={{ width: "24%" }} />
-                      </colgroup>
-                      <thead>
-                        <tr>
-                          <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>
-                            Subject
-                          </th>
-                          <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L1</th>
-                          <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L2</th>
-                          <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L3</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {LEVELED_SUBJECTS.map((subject, index) => {
-                          const demand = step0DemandBySubject[subject];
-                          const subjectDef = SUBJECTS[subject];
-                          const routing = routingPlans[subject];
-                          const forcePanels = forceMovePanels[subject];
-                          return (
-                            <tr key={subject} style={{ background: index % 2 ? "#FAFAF7" : "#fff" }}>
-                              <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                                <div className="step0-subject-cell">
-                                  <span style={{ fontSize: 12, fontWeight: 900, color: subjectDef.color }}>{subjectLabel(subject)}</span>
-                                  <span className={cx("level-action-count", LEVELS.some((level) => routing.run[level]) && "ok")}>
-                                    {LEVELS.filter((level) => routing.run[level]).length}/{LEVELS.length} levels running
-                                  </span>
-                                </div>
-                                <div style={{ marginTop: 8, fontSize: 11, color: "#6B665F" }}>
-                                  {demand.mergedCount} students force-moved
-                                </div>
-                              </td>
-                              {LEVELS.map((level) => {
-                                const run = routing.run[level];
-                                const baseCount = demand.base[level];
-                                const forceOpen = forcePanels[level];
-                                const source = routing.forceMove[level as "L1" | "L2" | "L3"];
-                                const remaining = (() => {
-                                  if (level === "L2") {
-                                    return Math.max(0, baseCount - routing.forceMove.L2.toL1 - routing.forceMove.L2.toL3);
-                                  }
-                                  return Math.max(0, baseCount - (source as { count: number }).count);
-                                })();
-
-                                return (
-                                  <td key={level} className="step0-level-cell" style={{ verticalAlign: "top", paddingBottom: 12 }}>
-                                    <div className="step0-level-count">{baseCount} students</div>
-                                    <label className="step0-run-check">
-                                      <span>Run</span>
-                                      <input
-                                        type="checkbox"
-                                        checked={run}
-                                        onChange={() => toggleRunLevel(subject, level)}
-                                        aria-label={`Run ${subject} ${level}`}
-                                      />
-                                    </label>
-
-                                    <div style={{ marginTop: 8 }}>
-                                      <button
-                                        type="button"
-                                        className={cx("gcr-opt", !run && "on")}
-                                        disabled={run}
-                                        onClick={() => {
-                                          if (run) return;
-                                          toggleForceMovePanel(subject, level);
-                                        }}
-                                        style={run ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
-                                      >
-                                        {level === "L2" ? "Split" : "Force move"}
-                                      </button>
-                                    </div>
-
-                                    {!run && forceOpen && (
-                                      <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                                        {level === "L2" ? (
-                                          <>
-                                            <label style={{ fontSize: 11, color: "#6B665F" }}>
-                                              Move to L1
-                                              <input
-                                                type="number"
-                                                min={0}
-                                                max={baseCount}
-                                                value={routing.forceMove.L2.toL1}
-                                                onChange={(event) => setSplitForceMoveCount(subject, "toL1", event.target.value)}
-                                                style={{ marginTop: 4, width: "100%" }}
-                                              />
-                                            </label>
-                                            <label style={{ fontSize: 11, color: "#6B665F" }}>
-                                              Move to L3
-                                              <input
-                                                type="number"
-                                                min={0}
-                                                max={baseCount}
-                                                value={routing.forceMove.L2.toL3}
-                                                onChange={(event) => setSplitForceMoveCount(subject, "toL3", event.target.value)}
-                                                style={{ marginTop: 4, width: "100%" }}
-                                              />
-                                            </label>
-                                          </>
-                                        ) : (
-                                          <>
-                                            <label style={{ fontSize: 11, color: "#6B665F" }}>
-                                              Destination
-                                              <select
-                                                value={routing.forceMove[level].target}
-                                                onChange={(event) => setSingleForceMoveTarget(subject, level as "L1" | "L3", event.target.value as Level)}
-                                                style={{ marginTop: 4, width: "100%" }}
-                                              >
-                                                {LEVELS.filter((target) => target !== level).map((target) => (
-                                                  <option key={`${subject}-${level}-${target}`} value={target}>
-                                                    {target}
-                                                  </option>
-                                                ))}
-                                              </select>
-                                            </label>
-                                            <label style={{ fontSize: 11, color: "#6B665F" }}>
-                                              Students to move
-                                              <input
-                                                type="number"
-                                                min={0}
-                                                max={baseCount}
-                                                value={routing.forceMove[level].count}
-                                                onChange={(event) => setSingleForceMoveCount(subject, level as "L1" | "L3", event.target.value)}
-                                                style={{ marginTop: 4, width: "100%" }}
-                                              />
-                                            </label>
-                                          </>
-                                        )}
-                                        <span style={{ fontSize: 10, color: "#B45309", fontWeight: 700 }}>
-                                          {remaining} remain in {level} (forced stays)
-                                        </span>
-                                      </div>
-                                    )}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className={cx("step-status", step0Complete && "ok")}>
-                    {step0Complete
-                      ? "Step 0 complete. Run levels and force-move rules are set."
-                      : `Subjects with at least one running level: ${step0ReadySubjectCount}/${LEVELED_SUBJECTS.length}`}
-                  </div>
-                  <div style={{ marginTop: 10, fontSize: 11, color: "#6B665F" }}>
-                    Force move is only configurable when a level is not running.
+                  <div className="step-track">
+                    {[0, 1, 2].map((step) => (
+                      <div key={step} className={cx("step-node", activeCampusStep === step && "on", activeCampusStep > step && "done")} />
+                    ))}
                   </div>
                 </div>
 
-                {revealedStep >= 1 ? (
-                  <div className="card">
-                    <div className="card-t">
-                      Step 1 — Bundle to Room Map
-                      <span className="meta">Pick bundle and edit room hosts. Changes are applied immediately.</span>
+                {activeCampusStep > 0 && (
+                  <div className="step-mini">
+                    <div>
+                      <div className="step-mini-title">Step 0 complete</div>
+                      <div className="step-mini-copy">{step0ReadySubjectCount}/{LEVELED_SUBJECTS.length} subjects have running levels.</div>
                     </div>
+                    <button className="step-mini-btn" onClick={() => jumpBackToStep(0)}>
+                      Edit Step 0
+                    </button>
+                  </div>
+                )}
+
+                {activeCampusStep > 1 && (
+                  <div className="step-mini">
+                    <div>
+                      <div className="step-mini-title">Step 1 complete</div>
+                      <div className="step-mini-copy">{selectedStreamCount}/{LEVELED_SUBJECTS.length} bundle maps selected.</div>
+                    </div>
+                    <button className="step-mini-btn" onClick={() => jumpBackToStep(1)}>
+                      Edit Step 1
+                    </button>
+                  </div>
+                )}
+
+                {activeCampusStep === 0 && (
+                  <div className="card step-focus">
+                    <div className="card-t">Step 0 — Qudrat status and level demand</div>
+                    <div className="step-inline-note" style={{ marginBottom: 10 }}>
+                      {g12DoneQCount} students are not included in Kammi/Lafthi counts below because they are done with Qudrat.
+                    </div>
+
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+                        <colgroup>
+                          <col style={{ width: "28%" }} />
+                          <col style={{ width: "24%" }} />
+                          <col style={{ width: "24%" }} />
+                          <col style={{ width: "24%" }} />
+                        </colgroup>
+                        <thead>
+                          <tr>
+                            <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>
+                              Subject
+                            </th>
+                            <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L1</th>
+                            <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L2</th>
+                            <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L3</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {LEVELED_SUBJECTS.map((subject, index) => {
+                            const demand = step0DemandBySubject[subject];
+                            const subjectDef = SUBJECTS[subject];
+                            const routing = routingPlans[subject];
+                            const forcePanels = forceMovePanels[subject];
+                            return (
+                              <tr key={subject} style={{ background: index % 2 ? "#FAFAF7" : "#fff" }}>
+                                <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", whiteSpace: "nowrap", verticalAlign: "top" }}>
+                                  <div style={{ fontSize: 12, fontWeight: 900, color: subjectDef.color }}>{subjectLabel(subject)}</div>
+                                  <div className="step-inline-note" style={{ marginTop: 6 }}>
+                                    {LEVELS.filter((level) => routing.run[level]).length}/3 levels running · {demand.mergedCount} force-moved
+                                  </div>
+                                </td>
+                                {LEVELS.map((level) => {
+                                  const run = routing.run[level];
+                                  const baseCount = demand.base[level];
+                                  const forceOpen = forcePanels[level];
+                                  const source = routing.forceMove[level as "L1" | "L2" | "L3"];
+                                  const remaining = (() => {
+                                    if (level === "L2") {
+                                      return Math.max(0, baseCount - routing.forceMove.L2.toL1 - routing.forceMove.L2.toL3);
+                                    }
+                                    return Math.max(0, baseCount - (source as { count: number }).count);
+                                  })();
+
+                                  return (
+                                    <td key={level} className="step0-level-cell" style={{ verticalAlign: "top", paddingBottom: 12 }}>
+                                      <div className="step0-level-count">{baseCount} students</div>
+                                      <label className="step0-run-check">
+                                        <span>Run</span>
+                                        <input
+                                          type="checkbox"
+                                          checked={run}
+                                          onChange={() => toggleRunLevel(subject, level)}
+                                          aria-label={`Run ${subject} ${level}`}
+                                        />
+                                      </label>
+
+                                      <div style={{ marginTop: 8 }}>
+                                        <button
+                                          type="button"
+                                          className={cx("gcr-opt", !run && "on")}
+                                          disabled={run}
+                                          onClick={() => {
+                                            if (run) return;
+                                            toggleForceMovePanel(subject, level);
+                                          }}
+                                          style={run ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
+                                        >
+                                          {level === "L2" ? "Split" : "Force move"}
+                                        </button>
+                                      </div>
+
+                                      {!run && forceOpen && (
+                                        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                                          {level === "L2" ? (
+                                            <>
+                                              <label style={{ fontSize: 11, color: "#6B665F" }}>
+                                                Move to L1
+                                                <input
+                                                  type="number"
+                                                  min={0}
+                                                  max={baseCount}
+                                                  value={routing.forceMove.L2.toL1}
+                                                  onChange={(event) => setSplitForceMoveCount(subject, "toL1", event.target.value)}
+                                                  style={{ marginTop: 4, width: "100%" }}
+                                                />
+                                              </label>
+                                              <label style={{ fontSize: 11, color: "#6B665F" }}>
+                                                Move to L3
+                                                <input
+                                                  type="number"
+                                                  min={0}
+                                                  max={baseCount}
+                                                  value={routing.forceMove.L2.toL3}
+                                                  onChange={(event) => setSplitForceMoveCount(subject, "toL3", event.target.value)}
+                                                  style={{ marginTop: 4, width: "100%" }}
+                                                />
+                                              </label>
+                                            </>
+                                          ) : (
+                                            <>
+                                              <label style={{ fontSize: 11, color: "#6B665F" }}>
+                                                Destination
+                                                <select
+                                                  value={routing.forceMove[level].target}
+                                                  onChange={(event) => setSingleForceMoveTarget(subject, level as "L1" | "L3", event.target.value as Level)}
+                                                  style={{ marginTop: 4, width: "100%" }}
+                                                >
+                                                  {LEVELS.filter((target) => target !== level).map((target) => (
+                                                    <option key={`${subject}-${level}-${target}`} value={target}>
+                                                      {target}
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              </label>
+                                              <label style={{ fontSize: 11, color: "#6B665F" }}>
+                                                Students to move
+                                                <input
+                                                  type="number"
+                                                  min={0}
+                                                  max={baseCount}
+                                                  value={routing.forceMove[level].count}
+                                                  onChange={(event) => setSingleForceMoveCount(subject, level as "L1" | "L3", event.target.value)}
+                                                  style={{ marginTop: 4, width: "100%" }}
+                                                />
+                                              </label>
+                                            </>
+                                          )}
+                                          <span style={{ fontSize: 10, color: "#6B665F", fontWeight: 700 }}>
+                                            {remaining} remain in {level}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="step-inline-note" style={{ marginTop: 10 }}>
+                      {step0Complete
+                        ? "Ready for Step 1."
+                        : `${step0ReadySubjectCount}/${LEVELED_SUBJECTS.length} subjects have at least one running level.`}
+                    </div>
+                    <div className="step-actions">
+                      <button className="apply-btn" disabled={!step0Complete} onClick={() => setActiveCampusStep(1)}>
+                        Continue to Step 1
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {activeCampusStep === 1 && (
+                  <div className="card step-focus">
+                    <div className="card-t">Step 1 — Bundle and room map</div>
 
                     {LEVELED_SUBJECTS.map((subject) => {
                       const subjectDef = SUBJECTS[subject];
@@ -924,10 +1001,7 @@ export default function AppV6() {
 
                       return (
                         <div key={subject} style={{ marginBottom: 24 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                            <div style={{ fontSize: 12, fontWeight: 900, color: subjectDef.color }}>{subjectLabel(subject)}</div>
-                            {issues.length === 0 ? <span className="pill po">Valid</span> : <span className="pill pb">Needs fix</span>}
-                          </div>
+                          <div style={{ fontSize: 12, fontWeight: 900, color: subjectDef.color, marginBottom: 6 }}>{subjectLabel(subject)}</div>
 
                           {options.map((group) => {
                             const picked = pickedId === group.id;
@@ -939,8 +1013,8 @@ export default function AppV6() {
                               >
                                 <div className="so-radio">{picked && <div className="so-dot" />}</div>
                                 <div className="so-info">
-                                  <div className="so-slot">Bundle meetings: Slot {group.slot} · {group.slotLabel}</div>
-                                  <div className="so-pattern">📅 {patternLabel(group.pattern)}</div>
+                                  <div className="so-slot">Slot {group.slot} · {group.slotLabel}</div>
+                                  <div className="so-pattern">{patternLabel(group.pattern)}</div>
                                   <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
                                     {LEVELS.map((level) => {
                                       const course = group.levels.find((entry) => entry?.level === level);
@@ -1014,19 +1088,15 @@ export default function AppV6() {
                           ) : null}
 
                           {preview ? (
-                            <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                              <span className="pill pd">{preview.summary.stay} stay</span>
-                              <span className="pill pb">{preview.summary.move} move</span>
-                              <span className="pill bgy">{preview.summary.forcedStays} forced stays</span>
-                              {preview.summary.worstRoom ? (
-                                <span className="pill pp">
-                                  worst room: {preview.summary.worstRoom.effective}/{preview.summary.worstRoom.capacity}
-                                </span>
-                              ) : null}
+                            <div className="step-inline-note" style={{ marginTop: 8 }}>
+                              {preview.summary.stay} stay · {preview.summary.move} move · {preview.summary.forcedStays} forced stays
+                              {preview.summary.worstRoom
+                                ? ` · worst room ${preview.summary.worstRoom.effective}/${preview.summary.worstRoom.capacity}`
+                                : ""}
                             </div>
                           ) : (
-                            <div style={{ marginTop: 8, fontSize: 12, color: "#94908A" }}>
-                              Choose a policy in Step 0 and a bundle to generate room map.
+                            <div className="step-inline-note" style={{ marginTop: 8 }}>
+                              Choose a bundle to generate a room map.
                             </div>
                           )}
 
@@ -1043,25 +1113,22 @@ export default function AppV6() {
                       );
                     })}
 
-                    <div className={cx("step-status", step1Complete && "ok")}>
+                    <div className="step-inline-note">
                       {step1Complete
-                        ? "Step 1 complete. Room maps are valid for all leveled subjects."
-                        : `Bundles selected: ${selectedStreamCount}/${LEVELED_SUBJECTS.length}. Fix level coverage errors to continue.`}
+                        ? "Ready for Step 2."
+                        : `Bundles selected: ${selectedStreamCount}/${LEVELED_SUBJECTS.length}. Allocate all running levels.`}
                     </div>
-                  </div>
-                ) : (
-                  <div className="card step-lock">
-                    <div className="card-t">Step 1 — Bundle to Room Map</div>
-                    <div className="step-lock-copy">Finish Step 0 first.</div>
+                    <div className="step-actions">
+                      <button className="apply-btn" disabled={!step1Complete} onClick={() => setActiveCampusStep(2)}>
+                        Continue to Step 2
+                      </button>
+                    </div>
                   </div>
                 )}
 
-                {revealedStep >= 2 ? (
-                  <div className="card">
-                    <div className="card-t">
-                      {t.step2}
-                      <span className="meta">{t.step2Hint}</span>
-                    </div>
+                {activeCampusStep === 2 && (
+                  <div className="card step-focus">
+                    <div className="card-t">{t.step2}</div>
 
                     {GRADES.map((grade) => {
                       const subjects = GRADE_SUBJECTS[grade].all;
@@ -1121,12 +1188,12 @@ export default function AppV6() {
                       );
                     })}
 
-                    <div className={cx("step-status", step2Ready && "ok")}>
+                    <div className="step-inline-note">
                       {step2Ready
-                        ? t.step2Ready
+                        ? "Ready to apply."
                         : step2HardBlocked
-                          ? "Resolve blocking schedule conflicts in Step 2 before apply."
-                          : `${t.step2NeedsSelections} ${selectedGradeOfferings}/${requiredGradeOfferings.length}`}
+                          ? "Resolve schedule conflicts before applying."
+                          : `${selectedGradeOfferings}/${requiredGradeOfferings.length} selections completed.`}
                     </div>
                     {step2HardBlocked ? (
                       <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
@@ -1140,27 +1207,14 @@ export default function AppV6() {
                           </span>
                         ))}
                       </div>
-                    ) : (
-                      <div style={{ marginTop: 8, fontSize: 11, color: "#6B665F" }}>
-                        Step 2 selections are hard-blocked from colliding with leveled/grade-wide occupancy.
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="card step-lock">
-                    <div className="card-t">{t.step2}</div>
-                    <div className="step-lock-copy">{t.unlockStep2}</div>
+                    ) : null}
+                    <div className="step-actions">
+                      <button className="apply-btn" onClick={applyCampusPlan} disabled={!campusFlowComplete || computedWhitelist.size === 0}>
+                        {t.apply}
+                      </button>
+                    </div>
                   </div>
                 )}
-
-                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8, gap: 10, alignItems: "center" }}>
-                  <span style={{ fontSize: 11, color: "#94908A" }}>
-                    {campusFlowComplete ? "Apply pushes room-map placements into homerooms." : t.finishCampusFlowHint}
-                  </span>
-                  <button className="apply-btn" onClick={applyCampusPlan} disabled={!campusFlowComplete || computedWhitelist.size === 0}>
-                    {t.apply}
-                  </button>
-                </div>
               </>
             )}
 

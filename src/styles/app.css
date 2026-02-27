@@ -68,6 +68,11 @@ body {
   align-items: center;
 }
 
+.topbar-stat {
+  font-size: 11px;
+  color: #6B665F;
+}
+
 .pill {
   font-size: 11px;
   font-weight: 600;
@@ -211,6 +216,102 @@ body {
 .step-lock-copy {
   font-size: 12px;
   color: #6B665F;
+}
+
+.step-shell {
+  background: #fff;
+  border: 1px solid #E8E4DD;
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+
+.step-shell-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.step-shell-sub {
+  font-size: 11px;
+  font-weight: 500;
+  color: #94908A;
+}
+
+.step-track {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.step-node {
+  height: 6px;
+  border-radius: 999px;
+  background: #E8E4DD;
+}
+
+.step-node.done {
+  background: #1a1a1a;
+}
+
+.step-node.on {
+  background: #6B665F;
+}
+
+.step-mini {
+  background: #fff;
+  border: 1px solid #E8E4DD;
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.step-mini-title {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.step-mini-copy {
+  font-size: 11px;
+  color: #6B665F;
+}
+
+.step-mini-btn {
+  border: 1px solid #D9D4CA;
+  background: #fff;
+  color: #4B4742;
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.step-mini-btn:hover {
+  border-color: #BEB8AD;
+}
+
+.step-focus {
+  padding: 18px 20px;
+}
+
+.step-inline-note {
+  font-size: 11px;
+  color: #6B665F;
+}
+
+.step-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .step0-subject-head {
