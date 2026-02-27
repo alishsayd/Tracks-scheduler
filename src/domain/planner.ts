@@ -273,6 +273,35 @@ export function computeMovement(
   for (const student of roomStudents) {
     if (!inThisRoom(student)) continue;
 
+    if (subject.tahsili && student.grade === 12 && !student.doneQ) {
+      const slotHasQudratSupply = homerooms.some((room) => {
+        const candidateId = getAssignment(assignments, room.id, day, slotId);
+        if (!candidateId) return false;
+        const candidate = courses.find((entry) => entry.id === candidateId);
+        if (!candidate) return false;
+        return SUBJECTS[candidate.subject].qudrat === true;
+      });
+
+      if (!slotHasQudratSupply) {
+        aligned.push(student);
+        continue;
+      }
+
+      const options = optionsFor(student);
+      const qudratOptions = options.filter((option) => SUBJECTS[courses.find((entry) => entry.id === option.courseId)!.subject].qudrat);
+      if (qudratOptions.length > 0) {
+        mustMoveOut.push({
+          ...student,
+          neededLabel: `${t.qudratLabel} (${t.notDone})`,
+          options: qudratOptions,
+          resolved: moveResolutions?.[student.id]?.[blockKey],
+        });
+      } else {
+        forcedStay.push({ ...student, reason: `${t.reasonNoSupply} (${t.qudratLabel})` });
+      }
+      continue;
+    }
+
     if (courseMatchesStudent(course, student)) {
       aligned.push(student);
       continue;
@@ -297,21 +326,6 @@ export function computeMovement(
     }
 
     const options = optionsFor(student);
-
-    if (subject.tahsili && student.grade === 12 && !student.doneQ) {
-      const qudratOptions = options.filter((option) => SUBJECTS[courses.find((entry) => entry.id === option.courseId)!.subject].qudrat);
-      if (qudratOptions.length > 0) {
-        mustMoveOut.push({
-          ...student,
-          neededLabel: `${t.qudratLabel} (${t.notDone})`,
-          options: qudratOptions,
-          resolved: moveResolutions?.[student.id]?.[blockKey],
-        });
-      } else {
-        forcedStay.push({ ...student, reason: `${t.reasonNoSupply} (${t.qudratLabel})` });
-      }
-      continue;
-    }
 
     if (options.length > 0) {
       const need = subject.leveled ? student.needs[course.subject as "kammi" | "lafthi" | "esl"] : `${t.grade} ${student.grade}`;

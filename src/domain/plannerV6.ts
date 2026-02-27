@@ -1,7 +1,7 @@
 import { LEVELS, SUBJECTS } from "./constants";
 import type { Assignments, Course, Day, Homeroom, LeveledSubject, Level, StreamGroup, Student } from "./types";
 
-export type SacrificePolicy = "run_all" | "merge_l3_to_l2" | "merge_l1_to_l2";
+export type SacrificePolicy = "run_all" | "merge_l3_to_l2" | "merge_l1_to_l2" | "merge_l2_to_l1" | "merge_l2_to_l3";
 export type RoomHost = Level | "AUTO_TAHSILI";
 
 export interface Step0Demand {
@@ -57,36 +57,45 @@ function cloneCounts(input: Record<Level, number>): Record<Level, number> {
 export function policyLabel(policy: SacrificePolicy) {
   if (policy === "merge_l3_to_l2") return "L3 -> L2";
   if (policy === "merge_l1_to_l2") return "L1 -> L2";
+  if (policy === "merge_l2_to_l1") return "L2 -> L1";
+  if (policy === "merge_l2_to_l3") return "L2 -> L3";
   return "Run L1 + L2 + L3";
 }
 
 export function levelAfterPolicy(level: Level, policy: SacrificePolicy): Level {
   if (policy === "merge_l3_to_l2" && level === "L3") return "L2";
   if (policy === "merge_l1_to_l2" && level === "L1") return "L2";
+  if (policy === "merge_l2_to_l1" && level === "L2") return "L1";
+  if (policy === "merge_l2_to_l3" && level === "L2") return "L3";
   return level;
 }
 
 export function levelsForPolicy(policy: SacrificePolicy): Level[] {
   if (policy === "merge_l3_to_l2") return ["L1", "L2"];
   if (policy === "merge_l1_to_l2") return ["L2", "L3"];
+  if (policy === "merge_l2_to_l1") return ["L1", "L3"];
+  if (policy === "merge_l2_to_l3") return ["L1", "L3"];
   return [...LEVELS];
 }
 
 function subjectDemand(students: Student[], subject: LeveledSubject, policy: SacrificePolicy): Step0Demand {
   const base = emptyCounts();
   const effective = emptyCounts();
+  let mergedCount = 0;
 
   for (const student of students) {
     if (student.done[subject]) continue;
     const needs = student.needs[subject];
+    const mapped = levelAfterPolicy(needs, policy);
     base[needs] += 1;
-    effective[levelAfterPolicy(needs, policy)] += 1;
+    effective[mapped] += 1;
+    if (mapped !== needs) mergedCount += 1;
   }
 
   return {
     base,
     effective,
-    mergedCount: Math.abs(base.L1 - effective.L1) + Math.abs(base.L3 - effective.L3),
+    mergedCount,
     levelsRunning: levelsForPolicy(policy),
   };
 }

@@ -24,7 +24,6 @@ import {
   policyLabel,
   type RoomHost,
   type SacrificePolicy,
-  type SubjectBundlePlan,
 } from "./domain/plannerV6";
 import { courseLabel } from "./domain/rules";
 import type {
@@ -99,7 +98,6 @@ export default function AppV6() {
     lafthi: {},
     esl: {},
   });
-  const [confirmedPlans, setConfirmedPlans] = useState<Partial<Record<LeveledSubject, SubjectBundlePlan>>>({});
   const [gradeCourseSelections, setGradeCourseSelections] = useState<GradeCourseSelections>({});
   const [step2Conflicts, setStep2Conflicts] = useState<ConflictFlag[]>([]);
   const [campusWhitelist, setCampusWhitelist] = useState<Set<string> | null>(null);
@@ -144,9 +142,41 @@ export default function AppV6() {
     return previews;
   }, [selectedStreams, sacrificePolicies, students, hostOverrides]);
 
-  const step1Complete = useMemo(() => LEVELED_SUBJECTS.every((subject) => Boolean(confirmedPlans[subject])), [confirmedPlans]);
   const selectedStreamCount = useMemo(() => LEVELED_SUBJECTS.filter((subject) => Boolean(selectedStreams[subject])).length, [selectedStreams]);
-  const confirmedStreamCount = useMemo(() => LEVELED_SUBJECTS.filter((subject) => Boolean(confirmedPlans[subject])).length, [confirmedPlans]);
+
+  const step1Issues = useMemo(() => {
+    const issues: Record<LeveledSubject, string[]> = {
+      kammi: [],
+      lafthi: [],
+      esl: [],
+    };
+
+    for (const subject of LEVELED_SUBJECTS) {
+      const streamId = selectedStreams[subject];
+      if (!streamId) {
+        issues[subject].push("Select a bundle.");
+        continue;
+      }
+
+      const preview = subjectPreviews[subject];
+      if (!preview) {
+        issues[subject].push("Room map is missing.");
+        continue;
+      }
+
+      const hostRows = preview.rows.filter((row) => !row.fixed);
+      for (const level of preview.levelsRunning) {
+        const hasRoom = hostRows.some((row) => row.host === level);
+        if (!hasRoom) {
+          issues[subject].push(`Missing room allocation for ${level}.`);
+        }
+      }
+    }
+
+    return issues;
+  }, [selectedStreams, subjectPreviews]);
+
+  const step1Complete = useMemo(() => LEVELED_SUBJECTS.every((subject) => step1Issues[subject].length === 0), [step1Issues]);
 
   const requiredGradeOfferings = useMemo(() => {
     const required: Array<{ grade: number; subject: SubjectKey }> = [];
@@ -188,21 +218,23 @@ export default function AppV6() {
     const next: Assignments = {};
 
     for (const subject of LEVELED_SUBJECTS) {
-      const plan = confirmedPlans[subject];
-      if (!plan) continue;
+      const streamGroupId = selectedStreams[subject];
+      const preview = subjectPreviews[subject];
+      const policy = sacrificePolicies[subject];
+      if (!streamGroupId || !preview || !policy) continue;
 
-      const group = STREAM_GROUPS.find((entry) => entry.id === plan.streamGroupId);
+      const group = STREAM_GROUPS.find((entry) => entry.id === streamGroupId);
       if (!group) continue;
 
       const levelToCourse: Partial<Record<Level, string>> = {};
       for (const course of group.courses) {
         if (!course.level) continue;
-        if (!levelsForPolicy(plan.policy).includes(course.level)) continue;
+        if (!levelsForPolicy(policy).includes(course.level)) continue;
         levelToCourse[course.level] = course.id;
       }
 
       for (const room of HOMEROOMS) {
-        const host = plan.hostByRoom[room.id];
+        const host = preview.hostByRoom[room.id];
         if (host === "AUTO_TAHSILI") continue;
         const courseId = levelToCourse[host];
         if (!courseId || !whitelist.has(courseId)) continue;
@@ -254,26 +286,16 @@ export default function AppV6() {
     setStep2Conflicts(conflicts);
     setAssignments(next);
     setPage("homeroom");
-  }, [computedWhitelist, confirmedPlans, gradeCourseSelections, courses]);
+  }, [computedWhitelist, selectedStreams, subjectPreviews, sacrificePolicies, gradeCourseSelections, courses]);
 
   const setPolicy = useCallback((subject: LeveledSubject, policy: SacrificePolicy) => {
     setSacrificePolicies((prev) => ({ ...prev, [subject]: policy }));
     setHostOverrides((prev) => ({ ...prev, [subject]: {} }));
-    setConfirmedPlans((prev) => {
-      const next = { ...prev };
-      delete next[subject];
-      return next;
-    });
   }, []);
 
   const pickStream = useCallback((subject: LeveledSubject, streamGroupId: string) => {
     setSelectedStreams((prev) => ({ ...prev, [subject]: streamGroupId }));
     setHostOverrides((prev) => ({ ...prev, [subject]: {} }));
-    setConfirmedPlans((prev) => {
-      const next = { ...prev };
-      delete next[subject];
-      return next;
-    });
   }, []);
 
   const setHostForRoom = useCallback((subject: LeveledSubject, roomId: number, host: RoomHost) => {
@@ -284,29 +306,7 @@ export default function AppV6() {
         [roomId]: host,
       },
     }));
-    setConfirmedPlans((prev) => {
-      const next = { ...prev };
-      delete next[subject];
-      return next;
-    });
   }, []);
-
-  const confirmSubjectPlan = useCallback((subject: LeveledSubject) => {
-    const policy = sacrificePolicies[subject];
-    const streamGroupId = selectedStreams[subject];
-    const preview = subjectPreviews[subject];
-    if (!policy || !streamGroupId || !preview) return;
-
-    setConfirmedPlans((prev) => ({
-      ...prev,
-      [subject]: {
-        subject,
-        policy,
-        streamGroupId,
-        hostByRoom: preview.hostByRoom,
-      },
-    }));
-  }, [sacrificePolicies, selectedStreams, subjectPreviews]);
 
   const assignCourseToRoom = useCallback(
     (roomId: number, courseId: string) => {
@@ -479,7 +479,7 @@ export default function AppV6() {
                           <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L2</th>
                           <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L3</th>
                           <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>
-                            Sacrifice Policy
+                            Level Remap
                           </th>
                         </tr>
                       </thead>
@@ -507,7 +507,7 @@ export default function AppV6() {
                               })}
                               <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8" }}>
                                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                  {(["run_all", "merge_l3_to_l2", "merge_l1_to_l2"] as SacrificePolicy[]).map((policy) => (
+                                  {(["run_all", "merge_l3_to_l2", "merge_l1_to_l2", "merge_l2_to_l1", "merge_l2_to_l3"] as SacrificePolicy[]).map((policy) => (
                                     <button
                                       key={policy}
                                       className={cx("gcr-opt", selectedPolicy === policy && "on")}
@@ -532,11 +532,11 @@ export default function AppV6() {
 
                   <div className={cx("step-status", step0Complete && "ok")}>
                     {step0Complete
-                      ? "Step 0 complete. Demand + sacrifice policy locked in."
+                      ? "Step 0 complete. Demand + level remap policy set."
                       : `Subjects with policy selected: ${step0ReadySubjectCount}/${LEVELED_SUBJECTS.length}`}
                   </div>
                   <div style={{ marginTop: 10, fontSize: 11, color: "#6B665F" }}>
-                    Output is explicit per subject: levels running after sacrifice, and expected forced stays.
+                    Lead is remapping demand between levels (not force-moving specific students here). You can remap from L2 as well.
                   </div>
                 </div>
 
@@ -544,7 +544,7 @@ export default function AppV6() {
                   <div className="card">
                     <div className="card-t">
                       Step 1 — Bundle to Room Map
-                      <span className="meta">Pick bundle, edit room hosts, confirm per subject.</span>
+                      <span className="meta">Pick bundle and edit room hosts. Changes are applied immediately.</span>
                     </div>
 
                     {LEVELED_SUBJECTS.map((subject) => {
@@ -553,13 +553,13 @@ export default function AppV6() {
                       const pickedId = selectedStreams[subject];
                       const preview = subjectPreviews[subject];
                       const policy = sacrificePolicies[subject];
-                      const isConfirmed = Boolean(confirmedPlans[subject]);
+                      const issues = step1Issues[subject];
 
                       return (
                         <div key={subject} style={{ marginBottom: 24 }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                             <div style={{ fontSize: 12, fontWeight: 900, color: subjectDef.color }}>{subjectLabel(subject)}</div>
-                            {isConfirmed ? <span className="pill po">Confirmed</span> : <span className="pill pd">Draft</span>}
+                            {issues.length === 0 ? <span className="pill po">Valid</span> : <span className="pill pb">Needs fix</span>}
                           </div>
 
                           {options.map((group) => {
@@ -656,23 +656,30 @@ export default function AppV6() {
                                   worst room: {preview.summary.worstRoom.effective}/{preview.summary.worstRoom.capacity}
                                 </span>
                               ) : null}
-                              <button className="apply-btn" type="button" onClick={() => confirmSubjectPlan(subject)}>
-                                Confirm {subjectLabel(subject)}
-                              </button>
                             </div>
                           ) : (
                             <div style={{ marginTop: 8, fontSize: 12, color: "#94908A" }}>
                               Choose a policy in Step 0 and a bundle to generate room map.
                             </div>
                           )}
+
+                          {issues.length > 0 ? (
+                            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                              {issues.map((issue) => (
+                                <span key={`${subject}-${issue}`} style={{ fontSize: 11, color: "#B91C1C", fontWeight: 700 }}>
+                                  {issue}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
                       );
                     })}
 
                     <div className={cx("step-status", step1Complete && "ok")}>
                       {step1Complete
-                        ? "Step 1 complete. Room maps confirmed for all leveled subjects."
-                        : `Bundles selected: ${selectedStreamCount}/${LEVELED_SUBJECTS.length}. Confirmed: ${confirmedStreamCount}/${LEVELED_SUBJECTS.length}`}
+                        ? "Step 1 complete. Room maps are valid for all leveled subjects."
+                        : `Bundles selected: ${selectedStreamCount}/${LEVELED_SUBJECTS.length}. Fix level coverage errors to continue.`}
                     </div>
                   </div>
                 ) : (
