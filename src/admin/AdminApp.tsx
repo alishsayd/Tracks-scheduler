@@ -32,7 +32,9 @@ export function AdminApp() {
   const validation = useMemo(() => validateAdminConfig(draft), [draft]);
 
   const canApply = validation.errors.length === 0;
-  const schedulerHref = import.meta.env.BASE_URL || "/";
+  const base = import.meta.env.BASE_URL || "/";
+  const schedulerHref = base;
+  const schedulerV6Href = `${base}Tracks-scheduler1/`;
 
   const setRoomCount = (value: string) => {
     setDraft((prev) => ({
@@ -100,9 +102,14 @@ export function AdminApp() {
           <h1>Tracks Scheduler Admin</h1>
           <p>Control the synthetic dataset used by the scheduler prototype.</p>
         </div>
-        <a className="admin-link" href={schedulerHref}>
-          Open Scheduler
-        </a>
+        <div style={{ display: "flex", gap: 8 }}>
+          <a className="admin-link" href={schedulerHref}>
+            Open Scheduler
+          </a>
+          <a className="admin-link" href={schedulerV6Href}>
+            Open Scheduler v6
+          </a>
+        </div>
       </header>
 
       <section className="admin-card">

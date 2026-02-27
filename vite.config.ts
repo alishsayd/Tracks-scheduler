@@ -13,6 +13,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
         admin: resolve(__dirname, "admin/index.html"),
+        scheduler1: resolve(__dirname, "Tracks-scheduler1/index.html"),
       },
     },
   },
