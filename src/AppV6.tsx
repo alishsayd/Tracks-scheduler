@@ -672,18 +672,20 @@ export default function AppV6() {
                                 return (
                                   <td key={level} className="step0-level-cell" style={{ verticalAlign: "top", paddingBottom: 12 }}>
                                     <div className="step0-level-count">{baseCount} students</div>
-                                    <button
-                                      type="button"
-                                      className={cx("level-toggle", "step0-level-toggle", run && "on")}
-                                      onClick={() => toggleRunLevel(subject, level)}
-                                    >
-                                      Run
-                                    </button>
+                                    <label className="step0-run-check">
+                                      <span>Run</span>
+                                      <input
+                                        type="checkbox"
+                                        checked={run}
+                                        onChange={() => toggleRunLevel(subject, level)}
+                                        aria-label={`Run ${subject} ${level}`}
+                                      />
+                                    </label>
 
                                     <div style={{ marginTop: 8 }}>
                                       <button
                                         type="button"
-                                        className={cx("gcr-opt", forceOpen && "on")}
+                                        className={cx("gcr-opt", !run && "on")}
                                         disabled={run}
                                         onClick={() => {
                                           if (run) return;
