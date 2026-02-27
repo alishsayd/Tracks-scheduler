@@ -321,6 +321,12 @@ export default function App() {
 
                   <div style={{ overflowX: "auto" }}>
                     <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+                      <colgroup>
+                        <col style={{ width: "50%" }} />
+                        <col style={{ width: "16.666%" }} />
+                        <col style={{ width: "16.666%" }} />
+                        <col style={{ width: "16.666%" }} />
+                      </colgroup>
                       <thead>
                         <tr>
                           <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>{t.subject}</th>
@@ -348,43 +354,56 @@ export default function App() {
 
                   <div className="level-action">
                     <div className="level-action-title">{t.step0ActionTitle}</div>
-                    {LEVELED_SUBJECTS.map((subject) => {
-                      const subjectDef = SUBJECTS[subject];
-                      const selectedCount = LEVELS.filter((level) => levelOpen[subject][level] !== false).length;
-                      return (
-                        <div key={subject} className="level-action-row">
-                          <div className="level-action-subject">
-                            <span style={{ color: subjectDef.color }}>{subjectLabel(subject)}</span>
-                            <span className={cx("level-action-count", selectedCount >= 2 && "ok")}>
-                              {selectedCount}/{LEVELS.length} {t.levelsSelected}
-                            </span>
-                          </div>
-                          <div className="level-action-buttons">
-                            {LEVELS.map((level) => {
-                              const open = levelOpen[subject][level] !== false;
-                              return (
-                                <button
-                                  key={level}
-                                  type="button"
-                                  className={cx("level-toggle", open && "on")}
-                                  onClick={() =>
-                                    setLevelOpen((prev) => ({
-                                      ...prev,
-                                      [subject]: {
-                                        ...prev[subject],
-                                        [level]: !open,
-                                      },
-                                    }))
-                                  }
-                                >
-                                  {level}{open ? ` · ${t.run}` : ""}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
+                    <div style={{ overflowX: "auto" }}>
+                      <table className="level-action-table">
+                        <colgroup>
+                          <col style={{ width: "50%" }} />
+                          <col style={{ width: "16.666%" }} />
+                          <col style={{ width: "16.666%" }} />
+                          <col style={{ width: "16.666%" }} />
+                        </colgroup>
+                        <tbody>
+                          {LEVELED_SUBJECTS.map((subject, index) => {
+                            const subjectDef = SUBJECTS[subject];
+                            const selectedCount = LEVELS.filter((level) => levelOpen[subject][level] !== false).length;
+                            return (
+                              <tr key={subject} style={{ background: index % 2 ? "#F7F5F1" : "transparent" }}>
+                                <td className="level-action-subject-cell">
+                                  <div className="level-action-subject">
+                                    <span style={{ color: subjectDef.color }}>{subjectLabel(subject)}</span>
+                                    <span className={cx("level-action-count", selectedCount >= 2 && "ok")}>
+                                      {selectedCount}/{LEVELS.length} {t.levelsSelected}
+                                    </span>
+                                  </div>
+                                </td>
+                                {LEVELS.map((level) => {
+                                  const open = levelOpen[subject][level] !== false;
+                                  return (
+                                    <td key={level} className="level-action-toggle-cell">
+                                      <button
+                                        type="button"
+                                        className={cx("level-toggle", open && "on")}
+                                        onClick={() =>
+                                          setLevelOpen((prev) => ({
+                                            ...prev,
+                                            [subject]: {
+                                              ...prev[subject],
+                                              [level]: !open,
+                                            },
+                                          }))
+                                        }
+                                      >
+                                        {t.run}
+                                      </button>
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
 
                   <div className={cx("step-status", step0Complete && "ok")}>
