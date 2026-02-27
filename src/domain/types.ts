@@ -66,6 +66,7 @@ export interface Course {
   grade: number | null;
   segment: string | null;
   teacherName: string;
+  startTime: string;
   meetings: Meeting[];
   pattern: string;
 }

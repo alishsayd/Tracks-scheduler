@@ -3,13 +3,13 @@ import type { Day, Homeroom, Slot, SubjectDef, SubjectKey, Level } from "./types
 export const DAYS: Day[] = ["Sun", "Mon", "Tue", "Wed", "Thu"];
 
 export const SLOTS: Slot[] = [
-  { id: 1, start: "07:45", end: "08:30" },
-  { id: 2, start: "08:30", end: "09:15" },
-  { id: 3, start: "09:15", end: "10:00" },
-  { id: 4, start: "10:15", end: "11:00" },
-  { id: 5, start: "11:00", end: "11:45" },
-  { id: 6, start: "11:45", end: "12:30" },
-  { id: 7, start: "12:30", end: "13:15" },
+  { id: 1, start: "07:47", end: "08:32" },
+  { id: 2, start: "08:35", end: "09:20" },
+  { id: 3, start: "09:23", end: "10:08" },
+  { id: 4, start: "10:18", end: "11:03" },
+  { id: 5, start: "11:06", end: "11:51" },
+  { id: 6, start: "11:54", end: "12:39" },
+  { id: 7, start: "12:42", end: "13:27" },
 ];
 
 export const LEVELS: Level[] = ["L1", "L2", "L3"];

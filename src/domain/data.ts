@@ -28,6 +28,16 @@ const TEACHERS = [
 let teacherIndex = 0;
 const nextTeacher = () => TEACHERS[teacherIndex++ % TEACHERS.length];
 
+const COURSE_START_BY_SLOT: Record<number, string> = {
+  1: "07:45",
+  2: "08:30",
+  3: "09:15",
+  4: "10:15",
+  5: "11:00",
+  6: "11:45",
+  7: "12:30",
+};
+
 function seededRandom(seed: number) {
   let state = seed;
   return () => {
@@ -123,6 +133,8 @@ export function genCourses() {
   let cid = 1;
 
   const mk = (subject: SubjectKey, level: Level | null, grade: number | null, meetings: Array<{ day: Day; slot: number }>, segment: string | null = null) => {
+    const firstMeeting = meetings[0];
+    const startTime = firstMeeting ? COURSE_START_BY_SLOT[firstMeeting.slot] || "07:45" : "07:45";
     const course: Course = {
       id: `c${cid++}`,
       subject,
@@ -130,6 +142,7 @@ export function genCourses() {
       grade,
       segment,
       teacherName: nextTeacher(),
+      startTime,
       meetings,
       pattern: [...new Set(meetings.map((m) => m.day))].join("/"),
     };
@@ -149,7 +162,9 @@ export function genCourses() {
   for (const g of GRADES) mk("ministry", null, g, ["Mon", "Wed"].map((d) => ({ day: d as Day, slot: 6 })));
 
   for (const g of GRADES) mk("future", null, g, ["Wed"].map((d) => ({ day: d as Day, slot: 7 })));
+  for (const g of GRADES) mk("future", null, g, ["Mon", "Thu"].map((d) => ({ day: d as Day, slot: 5 })));
   for (const g of GRADES) mk("t_math", null, g, DAYS.map((d) => ({ day: d, slot: 7 })));
+  for (const g of GRADES) mk("t_math", null, g, DAYS.map((d) => ({ day: d, slot: 6 })));
 
   mk("t_physics", null, 12, ["Sun", "Tue"].map((d) => ({ day: d as Day, slot: 1 })));
   mk("t_chem", null, 12, ["Mon", "Thu"].map((d) => ({ day: d as Day, slot: 2 })));
@@ -182,7 +197,7 @@ export function buildStreamGroups(courses: Course[]) {
         id: `sg-${subject}-${slot}`,
         subject: subject as "kammi" | "lafthi" | "esl",
         slot,
-        slotLabel: slotInfo?.start || String(slot),
+        slotLabel: group[0].startTime || slotInfo?.start || String(slot),
         pattern: group[0].pattern,
         courses: group,
         levels: LEVELS.map((level) => group.find((course) => course.level === level)),

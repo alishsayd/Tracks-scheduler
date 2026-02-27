@@ -52,6 +52,14 @@ function cx(...parts: Array<string | boolean | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
+function meetingKey(day: Day, slot: number) {
+  return `${day}|${slot}`;
+}
+
+function toMeetingKeys(meetings: Array<{ day: Day; slot: number }>) {
+  return meetings.map((meeting) => meetingKey(meeting.day, meeting.slot));
+}
+
 function defaultRoutingPlans(): Record<LeveledSubject, SubjectRoutingPlan> {
   return {
     kammi: createDefaultSubjectRoutingPlan(),
@@ -220,6 +228,32 @@ export default function AppV6() {
     () => requiredGradeOfferings.length > 0 && selectedGradeOfferings === requiredGradeOfferings.length,
     [requiredGradeOfferings.length, selectedGradeOfferings]
   );
+
+  const leveledBlockedByGrade = useMemo(() => {
+    const blocked: Record<number, Set<string>> = {};
+    for (const grade of GRADES) blocked[grade] = new Set<string>();
+
+    for (const subject of LEVELED_SUBJECTS) {
+      const streamId = selectedStreams[subject];
+      const preview = subjectPreviews[subject];
+      if (!streamId || !preview) continue;
+
+      const group = STREAM_GROUPS.find((entry) => entry.id === streamId);
+      const meetings = group?.courses[0]?.meetings || [];
+      if (!meetings.length) continue;
+
+      for (const room of HOMEROOMS) {
+        const host = preview.hostByRoom[room.id];
+        if (!host || host === "AUTO_TAHSILI") continue;
+        if (!blocked[room.grade]) blocked[room.grade] = new Set<string>();
+        for (const key of toMeetingKeys(meetings)) {
+          blocked[room.grade].add(key);
+        }
+      }
+    }
+
+    return blocked;
+  }, [selectedStreams, subjectPreviews]);
 
   const campusFlowComplete = step0Complete && step1Complete && step2Complete;
 
@@ -916,23 +950,34 @@ export default function AppV6() {
                                 </div>
                                 <div className="gcr-options">
                                   {options.map((course) => {
-                                    const slotInfo = SLOTS.find((slot) => slot.id === course.meetings[0]?.slot);
                                     const isOn = selected === course.id;
+                                    const optionMeetingKeys = new Set(toMeetingKeys(course.meetings));
+                                    const blockedByLeveled = [...optionMeetingKeys].some((key) => leveledBlockedByGrade[grade]?.has(key));
+                                    const blockedBySelectedGradeWide = Object.entries(gradeCourseSelections[grade] || {}).some(([otherSubject, otherCourseId]) => {
+                                      if (!otherCourseId) return false;
+                                      if (otherSubject === subject) return false;
+                                      const otherCourse = getCourse(otherCourseId);
+                                      if (!otherCourse) return false;
+                                      return otherCourse.meetings.some((meeting) => optionMeetingKeys.has(meetingKey(meeting.day, meeting.slot)));
+                                    });
+                                    const blocked = !isOn && (blockedByLeveled || blockedBySelectedGradeWide);
                                     return (
                                       <button
                                         key={course.id}
                                         className={cx("gcr-opt", isOn && "on")}
-                                        onClick={() =>
+                                        disabled={blocked}
+                                        onClick={() => {
+                                          if (blocked) return;
                                           setGradeCourseSelections((prev) => ({
                                             ...prev,
                                             [grade]: {
                                               ...(prev[grade] || {}),
                                               [subject]: course.id,
                                             },
-                                          }))
-                                        }
+                                          }));
+                                        }}
                                       >
-                                        {t.slot} {course.meetings[0]?.slot} · {slotInfo?.start} · {patternLabel(course.pattern)} · {personLabel(course.teacherName)}
+                                        {t.slot} {course.meetings[0]?.slot} · {course.startTime} · {patternLabel(course.pattern)} · {personLabel(course.teacherName)}
                                       </button>
                                     );
                                   })}

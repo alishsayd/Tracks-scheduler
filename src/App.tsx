@@ -491,7 +491,6 @@ export default function App() {
                                 </div>
                                 <div className="gcr-options">
                                   {options.map((course) => {
-                                    const slotInfo = SLOTS.find((slot) => slot.id === course.meetings[0]?.slot);
                                     const isOn = selected === course.id;
                                     return (
                                       <button
@@ -507,7 +506,7 @@ export default function App() {
                                           }))
                                         }
                                       >
-                                        {t.slot} {course.meetings[0]?.slot} · {slotInfo?.start} · {patternLabel(course.pattern)} · {personLabel(course.teacherName)}
+                                        {t.slot} {course.meetings[0]?.slot} · {course.startTime} · {patternLabel(course.pattern)} · {personLabel(course.teacherName)}
                                       </button>
                                     );
                                   })}

@@ -427,6 +427,17 @@ body {
   border-color: #1a1a1a;
 }
 
+.gcr-opt:disabled {
+  background: #F3F2EF;
+  color: #B1ABA1;
+  border-color: #DFDAD2;
+  cursor: not-allowed;
+}
+
+.gcr-opt:disabled:hover {
+  border-color: #DFDAD2;
+}
+
 .apply-btn {
   padding: 10px 28px;
   font-size: 14px;
