@@ -41,21 +41,21 @@ export interface AdminConfigValidation {
 }
 
 const DEFAULT_CONFIG: AdminConfig = {
-  roomCount: 5,
+  roomCount: 8,
   gradeTotals: {
-    10: 44,
-    11: 44,
+    10: 87,
+    11: 65,
     12: 18,
   },
   doneRates: {
-    qudrat: { 10: 0, 11: 0, 12: 65 },
+    qudrat: { 10: 0, 11: 0, 12: 50 },
     esl: { 10: 0, 11: 0, 12: 0 },
   },
   subjectDistributions: {
     kammi: {
-      10: { L1: 50, L2: 40, L3: 10 },
-      11: { L1: 25, L2: 45, L3: 30 },
-      12: { L1: 10, L2: 35, L3: 55 },
+      10: { L1: 50, L2: 50, L3: 0 },
+      11: { L1: 32, L2: 58, L3: 10 },
+      12: { L1: 0, L2: 70, L3: 30 },
     },
     lafthi: {
       10: { L1: 50, L2: 45, L3: 5 },
