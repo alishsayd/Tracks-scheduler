@@ -97,6 +97,15 @@ interface ConflictFlag {
   nextCourseId: string;
 }
 
+interface Step2BlockingIssue {
+  grade: number;
+  subject: SubjectKey;
+  courseId: string;
+  day: Day;
+  slotId: number;
+  reason: "leveled" | "gradeWide";
+}
+
 export default function AppV6() {
   const [lang, setLang] = useState<Lang>("en");
   const t = getT(lang);
@@ -244,7 +253,7 @@ export default function AppV6() {
 
       for (const room of HOMEROOMS) {
         const host = preview.hostByRoom[room.id];
-        if (!host || host === "AUTO_TAHSILI") continue;
+        if (!host) continue;
         if (!blocked[room.grade]) blocked[room.grade] = new Set<string>();
         for (const key of toMeetingKeys(meetings)) {
           blocked[room.grade].add(key);
@@ -255,7 +264,123 @@ export default function AppV6() {
     return blocked;
   }, [selectedStreams, subjectPreviews]);
 
-  const campusFlowComplete = step0Complete && step1Complete && step2Complete;
+  const step2BlockingIssues = useMemo(() => {
+    const issues: Step2BlockingIssue[] = [];
+    const seen = new Set<string>();
+    const selectedByGrade: Record<number, Array<{ subject: SubjectKey; courseId: string }>> = {};
+
+    const pushIssue = (issue: Step2BlockingIssue) => {
+      const key = `${issue.reason}|${issue.grade}|${issue.subject}|${issue.courseId}|${issue.day}|${issue.slotId}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      issues.push(issue);
+    };
+
+    for (const grade of GRADES) {
+      selectedByGrade[grade] = [];
+      const selections = gradeCourseSelections[grade] || {};
+      for (const subject of GRADE_SUBJECTS[grade].all as SubjectKey[]) {
+        const courseId = selections[subject];
+        if (!courseId) continue;
+        const course = courses.find((entry) => entry.id === courseId);
+        if (!course) continue;
+        selectedByGrade[grade].push({ subject, courseId: course.id });
+
+        for (const meeting of course.meetings) {
+          if (leveledBlockedByGrade[grade]?.has(meetingKey(meeting.day, meeting.slot))) {
+            pushIssue({
+              grade,
+              subject,
+              courseId: course.id,
+              day: meeting.day,
+              slotId: meeting.slot,
+              reason: "leveled",
+            });
+          }
+        }
+      }
+    }
+
+    for (const grade of GRADES) {
+      const meetingToSelections = new Map<string, Array<{ subject: SubjectKey; courseId: string; day: Day; slotId: number }>>();
+
+      for (const selection of selectedByGrade[grade]) {
+        const course = courses.find((entry) => entry.id === selection.courseId);
+        if (!course) continue;
+        for (const meeting of course.meetings) {
+          const key = meetingKey(meeting.day, meeting.slot);
+          const list = meetingToSelections.get(key) || [];
+          list.push({ subject: selection.subject, courseId: selection.courseId, day: meeting.day, slotId: meeting.slot });
+          meetingToSelections.set(key, list);
+        }
+      }
+
+      for (const list of meetingToSelections.values()) {
+        if (list.length < 2) continue;
+        for (const entry of list) {
+          pushIssue({
+            grade,
+            subject: entry.subject,
+            courseId: entry.courseId,
+            day: entry.day,
+            slotId: entry.slotId,
+            reason: "gradeWide",
+          });
+        }
+      }
+    }
+
+    return issues;
+  }, [gradeCourseSelections, courses, leveledBlockedByGrade]);
+
+  useEffect(() => {
+    setGradeCourseSelections((prev) => {
+      let changed = false;
+      const next: GradeCourseSelections = {};
+
+      for (const grade of GRADES) {
+        const current = prev[grade] || {};
+        const cleaned: Partial<Record<SubjectKey, string | undefined>> = {};
+        const occupied = new Set<string>();
+
+        for (const subject of GRADE_SUBJECTS[grade].all as SubjectKey[]) {
+          const selectedCourseId = current[subject];
+          if (!selectedCourseId) continue;
+
+          const selectedCourse = courses.find(
+            (course) => course.id === selectedCourseId && course.grade === grade && course.subject === subject
+          );
+          if (!selectedCourse) {
+            changed = true;
+            continue;
+          }
+
+          const keys = toMeetingKeys(selectedCourse.meetings);
+          const blockedByLeveled = keys.some((key) => leveledBlockedByGrade[grade]?.has(key));
+          const blockedBySelected = keys.some((key) => occupied.has(key));
+
+          if (blockedByLeveled || blockedBySelected) {
+            changed = true;
+            continue;
+          }
+
+          cleaned[subject] = selectedCourseId;
+          keys.forEach((key) => occupied.add(key));
+        }
+
+        if (Object.keys(cleaned).length > 0) {
+          next[grade] = cleaned;
+        }
+      }
+
+      return changed ? next : prev;
+    });
+  }, [leveledBlockedByGrade, courses]);
+
+  const step2HardBlocked = step2BlockingIssues.length > 0;
+  const step2Ready = step2Complete && !step2HardBlocked;
+
+  const campusFlowComplete = step0Complete && step1Complete && step2Ready;
 
   useEffect(() => {
     setRevealedStep((prev) => {
@@ -267,6 +392,11 @@ export default function AppV6() {
   }, [step0Complete, step1Complete]);
 
   const applyCampusPlan = useCallback(() => {
+    if (step2BlockingIssues.length > 0) {
+      setPage("campus");
+      return;
+    }
+
     const whitelist = new Set(computedWhitelist);
     setCampusWhitelist(whitelist);
 
@@ -342,7 +472,7 @@ export default function AppV6() {
     setMoveResolutions(autoResolvedMoves);
     setAssignments(next);
     setPage("homeroom");
-  }, [computedWhitelist, selectedStreams, subjectPreviews, gradeCourseSelections, courses, students, t]);
+  }, [step2BlockingIssues, computedWhitelist, selectedStreams, subjectPreviews, gradeCourseSelections, courses, students, t]);
 
   const toggleRunLevel = useCallback((subject: LeveledSubject, level: Level) => {
     const willRun = !routingPlans[subject].run[level];
@@ -991,14 +1121,30 @@ export default function AppV6() {
                       );
                     })}
 
-                    <div className={cx("step-status", step2Complete && "ok")}>
-                      {step2Complete
+                    <div className={cx("step-status", step2Ready && "ok")}>
+                      {step2Ready
                         ? t.step2Ready
-                        : `${t.step2NeedsSelections} ${selectedGradeOfferings}/${requiredGradeOfferings.length}`}
+                        : step2HardBlocked
+                          ? "Resolve blocking schedule conflicts in Step 2 before apply."
+                          : `${t.step2NeedsSelections} ${selectedGradeOfferings}/${requiredGradeOfferings.length}`}
                     </div>
-                    <div style={{ marginTop: 8, fontSize: 11, color: "#6B665F" }}>
-                      Step 2 overwrites existing slot assignments and creates explicit conflict flags for manual reconciliation.
-                    </div>
+                    {step2HardBlocked ? (
+                      <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                        {step2BlockingIssues.map((issue) => (
+                          <span
+                            key={`${issue.reason}-${issue.grade}-${issue.subject}-${issue.courseId}-${issue.day}-${issue.slotId}`}
+                            style={{ fontSize: 11, color: "#B91C1C", fontWeight: 700 }}
+                          >
+                            {t.grade} {issue.grade} · {subjectLabel(issue.subject)} · {dayLabel(issue.day)} · {t.slot} {issue.slotId} ·{" "}
+                            {issue.reason === "leveled" ? "conflicts with leveled plan" : "conflicts with another grade-wide selection"}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 8, fontSize: 11, color: "#6B665F" }}>
+                        Step 2 selections are hard-blocked from colliding with leveled/grade-wide occupancy.
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="card step-lock">
