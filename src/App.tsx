@@ -29,7 +29,6 @@ import type {
   SidePanelState,
   SubjectKey,
   TabPage,
-  Level,
 } from "./domain/types";
 import "./styles/app.css";
 
@@ -42,42 +41,6 @@ const LEVELED_SUBJECTS = ["lafthi", "kammi", "esl"] as const;
 
 function cx(...parts: Array<string | boolean | null | undefined>) {
   return parts.filter(Boolean).join(" ");
-}
-
-function Bar({ dist, color }: { dist: Record<Level, number>; color: string }) {
-  const total = dist.L1 + dist.L2 + dist.L3;
-  if (total === 0) {
-    return <div style={{ flex: 1, fontSize: 10, color: "#B0ABA3", padding: "2px 6px" }}>—</div>;
-  }
-
-  const colors = [`${color}dd`, `${color}99`, `${color}55`];
-
-  return (
-    <div style={{ flex: 1, display: "flex", height: 22, borderRadius: 3, overflow: "hidden", background: "#F0EDE8", gap: 1 }}>
-      {LEVELS.map((level, index) => {
-        const percentage = (dist[level] / total) * 100;
-        return percentage > 0 ? (
-          <div
-            key={level}
-            style={{
-              width: `${percentage}%`,
-              background: colors[index],
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontFamily: "'JetBrains Mono',monospace",
-              fontSize: 10,
-              fontWeight: 600,
-              color: "#fff",
-              borderRadius: 2,
-            }}
-          >
-            {percentage >= 14 && `${level}:${dist[level]}`}
-          </div>
-        ) : null;
-      })}
-    </div>
-  );
 }
 
 export default function App() {
@@ -620,15 +583,32 @@ export default function App() {
                   </div>
                   {showProfile && (
                     <div className="rp-body">
-                      {(["kammi", "lafthi", "esl"] as const).map((subject) => {
-                        const subjectDef = SUBJECTS[subject];
-                        return (
-                          <div key={subject} className="rp-row">
-                            <div className="rp-sn" style={{ color: subjectDef.color }}>{subjectLabel(subject)}</div>
-                            <Bar dist={profile.ld[subject]} color={subjectDef.color} />
-                          </div>
-                        );
-                      })}
+                      <div style={{ overflowX: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+                          <thead>
+                            <tr>
+                              <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>{t.subject}</th>
+                              <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L1</th>
+                              <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L2</th>
+                              <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L3</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {LEVELED_SUBJECTS.map((subject, index) => {
+                              const subjectDef = SUBJECTS[subject];
+                              const dist = profile.ld[subject];
+                              return (
+                                <tr key={subject} style={{ background: index % 2 ? "#FAFAF7" : "#fff" }}>
+                                  <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontSize: 12, fontWeight: 900, color: subjectDef.color, whiteSpace: "nowrap" }}>{subjectLabel(subject)}</td>
+                                  <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L1}</td>
+                                  <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L2}</td>
+                                  <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L3}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   )}
                 </div>
