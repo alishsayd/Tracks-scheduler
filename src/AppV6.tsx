@@ -296,18 +296,52 @@ export default function AppV6() {
   }, [computedWhitelist, selectedStreams, subjectPreviews, gradeCourseSelections, courses]);
 
   const toggleRunLevel = useCallback((subject: LeveledSubject, level: Level) => {
-    setRoutingPlans((prev) => ({
-      ...prev,
-      [subject]: {
+    const willRun = !routingPlans[subject].run[level];
+
+    setRoutingPlans((prev) => {
+      const nextSubject = {
         ...prev[subject],
         run: {
           ...prev[subject].run,
-          [level]: !prev[subject].run[level],
+          [level]: willRun,
         },
-      },
-    }));
+      };
+
+      if (willRun) {
+        if (level === "L2") {
+          nextSubject.forceMove = {
+            ...nextSubject.forceMove,
+            L2: { toL1: 0, toL3: 0 },
+          };
+        } else {
+          nextSubject.forceMove = {
+            ...nextSubject.forceMove,
+            [level]: {
+              ...nextSubject.forceMove[level as "L1" | "L3"],
+              count: 0,
+            },
+          };
+        }
+      }
+
+      return {
+        ...prev,
+        [subject]: nextSubject,
+      };
+    });
+
+    if (willRun) {
+      setForceMovePanels((prev) => ({
+        ...prev,
+        [subject]: {
+          ...prev[subject],
+          [level]: false,
+        },
+      }));
+    }
+
     setHostOverrides((prev) => ({ ...prev, [subject]: {} }));
-  }, []);
+  }, [routingPlans]);
 
   const toggleForceMovePanel = useCallback((subject: LeveledSubject, level: Level) => {
     setForceMovePanels((prev) => ({
@@ -602,7 +636,11 @@ export default function AppV6() {
                                         type="button"
                                         className={cx("gcr-opt", forceOpen && "on")}
                                         disabled={run}
-                                        onClick={() => toggleForceMovePanel(subject, level)}
+                                        onClick={() => {
+                                          if (run) return;
+                                          toggleForceMovePanel(subject, level);
+                                        }}
+                                        style={run ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
                                       >
                                         {level === "L2" ? "Split" : "Force move"}
                                       </button>
