@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useMemo, useState } from "react";
 import { DAYS, GRADE_SUBJECTS, GRADES, HOMEROOMS, LEVELS, SLOTS, SUBJECTS } from "./domain/constants";
 import { buildStreamGroups, genCourses, genStudents } from "./domain/data";
-import { getT } from "./domain/i18n";
+import { formatDayPattern, getDayLabel, getSubjectLabelFromT, getT, localizePersonName, localizeRoomName, localizeSegment } from "./domain/i18n";
 import {
   buildCampusWhitelist,
   clearCourseMeetingsForRoom,
@@ -20,6 +20,7 @@ import {
 import { courseLabel } from "./domain/rules";
 import type {
   Assignments,
+  Day,
   Lang,
   MoveModalState,
   MoveResolutions,
@@ -79,6 +80,12 @@ export default function App() {
   const [lang, setLang] = useState<Lang>("en");
   const t = getT(lang);
   const dir = lang === "ar" ? "rtl" : "ltr";
+  const subjectLabel = useCallback((subject: SubjectKey) => getSubjectLabelFromT(t, subject), [t]);
+  const dayLabel = useCallback((day: Day) => getDayLabel(lang, day), [lang]);
+  const patternLabel = useCallback((pattern: string) => formatDayPattern(lang, pattern), [lang]);
+  const roomLabel = useCallback((roomName: string) => localizeRoomName(lang, roomName), [lang]);
+  const personLabel = useCallback((name: string) => localizePersonName(lang, name), [lang]);
+  const segmentLabel = useCallback((segment: string | null) => localizeSegment(lang, segment), [lang]);
 
   const [students] = useState(INIT_STUDENTS);
   const [courses] = useState(INIT_COURSES);
@@ -156,7 +163,7 @@ export default function App() {
   );
 
   const clearSlot = useCallback(
-    (roomId: number, day: "Sun" | "Mon" | "Tue" | "Wed" | "Thu", slotId: number) => {
+    (roomId: number, day: Day, slotId: number) => {
       const currentId = getAssignment(assignments, roomId, day, slotId);
       if (!currentId) return;
 
@@ -170,13 +177,13 @@ export default function App() {
   );
 
   const getAvailable = useCallback(
-    (day: "Sun" | "Mon" | "Tue" | "Wed" | "Thu", slotId: number, roomId: number) =>
+    (day: Day, slotId: number, roomId: number) =>
       getAvailableCourses(courses, campusWhitelist, assignments, day, slotId, roomId, subjectFilter),
     [courses, campusWhitelist, assignments, subjectFilter]
   );
 
   const computeMovementForCell = useCallback(
-    (roomId: number, day: "Sun" | "Mon" | "Tue" | "Wed" | "Thu", slotId: number) =>
+    (roomId: number, day: Day, slotId: number) =>
       computeMovement(roomId, day, slotId, assignments, courses, students, moveResolutions, campusWhitelist, t),
     [assignments, courses, students, moveResolutions, campusWhitelist, t]
   );
@@ -230,7 +237,7 @@ export default function App() {
             <div className={cx("pill", stats.filled === stats.total ? "po" : "pd")}>{stats.filled}/{stats.total} {t.slots}</div>
             <div className={cx("pill", stats.unresolved === 0 ? "po" : "pb")}>{stats.unresolved === 0 ? "✓" : stats.unresolved} {t.moves}</div>
             {stats.done && <div className="pill pp">✓ {t.done}</div>}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginInlineStart: 6 }}>
               <span style={{ fontSize: 11, color: "#94908A" }}>{t.language}</span>
               <div style={{ display: "inline-flex", border: "1px solid #E8E4DD", borderRadius: 999, overflow: "hidden" }}>
                 <button
@@ -287,11 +294,11 @@ export default function App() {
                     <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
                       <thead>
                         <tr>
-                          <th style={{ textAlign: "left", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>{t.subject}</th>
-                          <th style={{ textAlign: "left", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L1</th>
-                          <th style={{ textAlign: "left", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L2</th>
-                          <th style={{ textAlign: "left", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L3</th>
-                          <th style={{ textAlign: "left", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>{t.decision}</th>
+                          <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>{t.subject}</th>
+                          <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L1</th>
+                          <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L2</th>
+                          <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L3</th>
+                          <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>{t.decision}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -300,7 +307,7 @@ export default function App() {
                           const subjectDef = SUBJECTS[subject as SubjectKey];
                           return (
                             <tr key={subject} style={{ background: index % 2 ? "#FAFAF7" : "#fff" }}>
-                              <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontSize: 12, fontWeight: 900, color: subjectDef.color, whiteSpace: "nowrap" }}>{subjectDef.name}</td>
+                              <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontSize: 12, fontWeight: 900, color: subjectDef.color, whiteSpace: "nowrap" }}>{subjectLabel(subject as SubjectKey)}</td>
                               <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L1}</td>
                               <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L2}</td>
                               <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L3}</td>
@@ -362,7 +369,7 @@ export default function App() {
 
                     return (
                       <div key={subject} style={{ marginBottom: 16 }}>
-                        <div style={{ fontSize: 12, fontWeight: 900, color: subjectDef.color, marginBottom: 6 }}>{subjectDef.name}</div>
+                        <div style={{ fontSize: 12, fontWeight: 900, color: subjectDef.color, marginBottom: 6 }}>{subjectLabel(subject)}</div>
 
                         {options.map((group) => {
                           const picked = pickedId === group.id;
@@ -380,7 +387,7 @@ export default function App() {
                               <div className="so-radio">{picked && <div className="so-dot" />}</div>
                               <div className="so-info">
                                 <div className="so-slot">{t.bundleMeetings}: {t.slot} {group.slot} · {group.slotLabel}</div>
-                                <div className="so-pattern">📅 {group.pattern}</div>
+                                <div className="so-pattern">📅 {patternLabel(group.pattern)}</div>
                                 <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
                                   {LEVELS.map((level) => {
                                     const course = group.levels.find((entry) => entry?.level === level);
@@ -388,7 +395,7 @@ export default function App() {
                                     return (
                                       <div key={level} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "#6B665F" }}>
                                         <span style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 900, fontSize: 10, padding: "1px 6px", borderRadius: 4, background: subjectDef.bg, color: subjectDef.color }}>{level}</span>
-                                        <span style={{ flex: 1, fontWeight: 800 }}>{course.teacherName}</span>
+                                        <span style={{ flex: 1, fontWeight: 800 }}>{personLabel(course.teacherName)}</span>
                                       </div>
                                     );
                                   })}
@@ -423,7 +430,7 @@ export default function App() {
                             <div key={subject} className="grade-course-row">
                               <div className="gcr-name">
                                 <div className="gcr-dot" style={{ background: subjectDef.color }} />
-                                {subjectDef.name}
+                                {subjectLabel(subject)}
                               </div>
                               <div className="gcr-options">
                                 {options.map((course) => {
@@ -443,7 +450,7 @@ export default function App() {
                                         }))
                                       }
                                     >
-                                      Slot {course.meetings[0]?.slot} · {slotInfo?.start} · {course.pattern} · {course.teacherName}
+                                      {t.slot} {course.meetings[0]?.slot} · {slotInfo?.start} · {patternLabel(course.pattern)} · {personLabel(course.teacherName)}
                                     </button>
                                   );
                                 })}
@@ -480,7 +487,7 @@ export default function App() {
                           setShowProfile(true);
                         }}
                       >
-                        {room.name} <span style={{ fontSize: 10, opacity: 0.5 }}>G{room.grade}</span> <span className="rtab-n">{count}</span>
+                        {roomLabel(room.name)} <span style={{ fontSize: 10, opacity: 0.5 }}>{t.grade} {room.grade}</span> <span className="rtab-n">{count}</span>
                       </button>
                     );
                   })}
@@ -496,7 +503,7 @@ export default function App() {
                 <div className="rp">
                   <div className="rp-top" onClick={() => setShowProfile(!showProfile)}>
                     <div className="rp-tl">
-                      {HOMEROOMS[selectedRoom].name}
+                      {roomLabel(HOMEROOMS[selectedRoom].name)}
                       <span className="rp-m">{t.grade} {profile.grade} · {profile.total} {t.studentsLabel}</span>
                       {profile.qD > 0 && <span className="rp-tag" style={{ background: "#DEF7EC", color: "#059669" }}>✓{profile.qD} {t.doneQShort}</span>}
                       {profile.qN > 0 && <span className="rp-tag" style={{ background: "#FEF3C7", color: "#B45309" }}>{profile.qN} {t.stillQShort}</span>}
@@ -509,7 +516,7 @@ export default function App() {
                         const subjectDef = SUBJECTS[subject];
                         return (
                           <div key={subject} className="rp-row">
-                            <div className="rp-sn" style={{ color: subjectDef.color }}>{subjectDef.name}</div>
+                            <div className="rp-sn" style={{ color: subjectDef.color }}>{subjectLabel(subject)}</div>
                             <Bar dist={profile.ld[subject]} color={subjectDef.color} />
                           </div>
                         );
@@ -521,7 +528,7 @@ export default function App() {
                 <div className="grid">
                   <div className="gh"></div>
                   {DAYS.map((day) => (
-                    <div key={day} className="gh">{day}</div>
+                    <div key={day} className="gh">{dayLabel(day)}</div>
                   ))}
 
                   {SLOTS.map((slot, index) => (
@@ -570,9 +577,9 @@ export default function App() {
                                 >
                                   ×
                                 </button>
-                                <div className="ci-s">{subject?.name}</div>
-                                <div className="ci-l">{course.level || ""}{course.grade ? `G${course.grade}` : ""}</div>
-                                <div className="ci-t">{course.teacherName}</div>
+                                <div className="ci-s">{course ? subjectLabel(course.subject) : ""}</div>
+                                <div className="ci-l">{[course.level, course.grade ? `${t.grade} ${course.grade}` : ""].filter(Boolean).join(" · ")}</div>
+                                <div className="ci-t">{personLabel(course.teacherName)}</div>
                                 {movement && (
                                   <div className="badges">
                                     {movement.aligned.length > 0 && <span className="bg bgg">✓{movement.aligned.length}</span>}
@@ -621,8 +628,8 @@ export default function App() {
                     return (
                       <div key={group.blockKey} className="rc">
                         <div className="rc-hd">
-                          <span className="rc-d">{group.blockKey.split("|")[0]}</span>
-                          <span className="rc-sl">{group.day} · {slot?.start}–{slot?.end}</span>
+                          <span className="rc-d">{subjectLabel(group.blockKey.split("|")[0] as SubjectKey)}</span>
+                          <span className="rc-sl">{dayLabel(group.day)} · {slot?.start}–{slot?.end}</span>
                           <span className="rc-c">{group.students.length}</span>
                         </div>
                         <div className="rc-bd">
@@ -630,9 +637,9 @@ export default function App() {
                             const fromRoom = HOMEROOMS.find((room) => room.id === student.fromRoom);
                             return (
                               <div key={`${student.id}-${group.blockKey}`} className="rc-st">
-                                <span className="sr-n" style={{ flex: 1, fontWeight: 800 }}>{student.name}</span>
-                                <span className="sr-g">G{student.grade}</span>
-                                <span style={{ fontSize: 10, color: "#94908A" }}>{fromRoom?.name}</span>
+                                <span className="sr-n" style={{ flex: 1, fontWeight: 800 }}>{personLabel(student.name)}</span>
+                                <span className="sr-g">{t.grade} {student.grade}</span>
+                                <span style={{ fontSize: 10, color: "#94908A" }}>{fromRoom ? roomLabel(fromRoom.name) : ""}</span>
                                 <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "#FEF3C7", color: "#B45309" }}>{student.neededLabel}</span>
                                 <button
                                   className="sr-btn"
@@ -663,9 +670,9 @@ export default function App() {
             <div className="sp">
               <div className="sp-hd">
                 <div>
-                  <div className="sp-t" style={{ color: SUBJECTS[sidePanelData.course.subject].color }}>{courseLabel(sidePanelData.course)}</div>
+                  <div className="sp-t" style={{ color: SUBJECTS[sidePanelData.course.subject].color }}>{courseLabel(sidePanelData.course, lang)}</div>
                   <div className="sp-s">
-                    {sidePanel.day} · {SLOTS.find((slot) => slot.id === sidePanel.slotId)?.start} · {sidePanelData.course.teacherName} · {t.roster} {sidePanelData.movement.effectiveHere}/{HOMEROOMS[selectedRoom].capacity}
+                    {dayLabel(sidePanel.day)} · {SLOTS.find((slot) => slot.id === sidePanel.slotId)?.start} · {personLabel(sidePanelData.course.teacherName)} · {t.roster} {sidePanelData.movement.effectiveHere}/{HOMEROOMS[selectedRoom].capacity}
                   </div>
                 </div>
                 <button className="sp-x" onClick={() => setSidePanel(null)}>×</button>
@@ -675,7 +682,7 @@ export default function App() {
                 <div className="sp-sec">
                   <div className="sp-st">✅ {t.aligned} <span className="sp-cnt">{sidePanelData.movement.aligned.length}</span></div>
                   {sidePanelData.movement.aligned.map((student) => (
-                    <div key={student.id} className="sr"><span className="sr-n">{student.name}</span><span className="sr-g">G{student.grade}</span></div>
+                    <div key={student.id} className="sr"><span className="sr-n">{personLabel(student.name)}</span><span className="sr-g">{t.grade} {student.grade}</span></div>
                   ))}
                 </div>
 
@@ -686,8 +693,8 @@ export default function App() {
                   ) : (
                     sidePanelData.movement.mustMoveOut.map((student) => (
                       <div key={student.id} className="sr">
-                        <span className="sr-n">{student.name}</span>
-                        <span className="sr-g">G{student.grade}</span>
+                        <span className="sr-n">{personLabel(student.name)}</span>
+                        <span className="sr-g">{t.grade} {student.grade}</span>
                         <span className="sr-lv" style={{ background: "#FEF3C7", color: "#B45309" }}>{student.neededLabel}</span>
                         {student.resolved !== undefined && student.resolved !== null ? (
                           <button
@@ -702,7 +709,10 @@ export default function App() {
                               })
                             }
                           >
-                            → {HOMEROOMS.find((room) => room.id === student.resolved)?.name}
+                            → {(() => {
+                              const resolved = HOMEROOMS.find((room) => room.id === student.resolved);
+                              return resolved ? roomLabel(resolved.name) : "";
+                            })()}
                           </button>
                         ) : (
                           <button
@@ -731,7 +741,7 @@ export default function App() {
                     <div style={{ fontSize: 12, color: "#94908A" }}>—</div>
                   ) : (
                     sidePanelData.movement.forcedStay.map((student) => (
-                      <div key={student.id} className="sr"><span className="sr-n">{student.name}</span><span className="sr-g">G{student.grade}</span><span className="sr-r">{student.reason}</span></div>
+                      <div key={student.id} className="sr"><span className="sr-n">{personLabel(student.name)}</span><span className="sr-g">{t.grade} {student.grade}</span><span className="sr-r">{student.reason}</span></div>
                     ))
                   )}
                 </div>
@@ -742,7 +752,7 @@ export default function App() {
                     <div style={{ fontSize: 12, color: "#94908A" }}>—</div>
                   ) : (
                     sidePanelData.movement.moveIns.map((student) => (
-                      <div key={student.id} className="sr"><span className="sr-n">{student.name}</span><span className="sr-g">G{student.grade}</span><span className="sr-r">{t.from} {HOMEROOMS[student.homeroom]?.name}</span></div>
+                      <div key={student.id} className="sr"><span className="sr-n">{personLabel(student.name)}</span><span className="sr-g">{t.grade} {student.grade}</span><span className="sr-r">{t.from} {roomLabel(HOMEROOMS[student.homeroom]?.name || "")}</span></div>
                     ))
                   )}
                 </div>
@@ -777,7 +787,7 @@ export default function App() {
             <div className="m-hd">
               <div>
                 <h3>{t.availableCourses}</h3>
-                <div className="m-hd-s">{picker.day} · {SLOTS.find((slot) => slot.id === picker.slotId)?.start} · {HOMEROOMS[selectedRoom].name}</div>
+                <div className="m-hd-s">{dayLabel(picker.day)} · {SLOTS.find((slot) => slot.id === picker.slotId)?.start} · {roomLabel(HOMEROOMS[selectedRoom].name)}</div>
               </div>
               <button
                 className="m-x"
@@ -794,7 +804,7 @@ export default function App() {
               <button className={cx("pk-ch", subjectFilter === "all" && "on")} onClick={() => setSubjectFilter("all")}>{t.all}</button>
               {Object.entries(SUBJECTS).map(([key, subject]) => (
                 <button key={key} className={cx("pk-ch", subjectFilter === key && "on")} onClick={() => setSubjectFilter(key as SubjectKey)}>
-                  {subject.name}
+                  {subjectLabel(key as SubjectKey)}
                 </button>
               ))}
             </div>
@@ -814,7 +824,7 @@ export default function App() {
                   const subject = SUBJECTS[subjectKey as SubjectKey];
                   return (
                     <div key={subjectKey}>
-                      <div className="pk-sec">{subject.name}</div>
+                      <div className="pk-sec">{subjectLabel(subjectKey as SubjectKey)}</div>
                       {list.map((course) => (
                         <div
                           key={course.id}
@@ -832,11 +842,11 @@ export default function App() {
                         >
                           <div className="pk-cl" style={{ background: subject.color }} />
                           <div className="pk-i">
-                            <div className="pk-sn">{courseLabel(course)}</div>
-                            <div className="pk-mt">{course.teacherName}{course.segment ? ` · ${course.segment}` : ""}</div>
-                            <div className="pk-pt">📅 {course.pattern}</div>
+                            <div className="pk-sn">{courseLabel(course, lang)}</div>
+                            <div className="pk-mt">{personLabel(course.teacherName)}{course.segment ? ` · ${segmentLabel(course.segment)}` : ""}</div>
+                            <div className="pk-pt">📅 {patternLabel(course.pattern)}</div>
                           </div>
-                          <div className="pk-lv" style={{ background: subject.bg, color: subject.color }}>{course.level || (course.grade ? `G${course.grade}` : "All")}</div>
+                          <div className="pk-lv" style={{ background: subject.bg, color: subject.color }}>{course.level || (course.grade ? `${t.grade} ${course.grade}` : t.all)}</div>
                         </div>
                       ))}
                     </div>
@@ -854,7 +864,7 @@ export default function App() {
             <div className="m-hd" style={{ padding: "14px 16px" }}>
               <div>
                 <h3>{t.destination}</h3>
-                <p className="m-hd-s">{students.find((student) => student.id === moveModal.studentId)?.name} · {moveModal.day} {SLOTS.find((slot) => slot.id === moveModal.slotId)?.start}</p>
+                <p className="m-hd-s">{personLabel(students.find((student) => student.id === moveModal.studentId)?.name || "")} · {dayLabel(moveModal.day)} {SLOTS.find((slot) => slot.id === moveModal.slotId)?.start}</p>
               </div>
               <button className="m-x" onClick={() => setMoveModal(null)}>×</button>
             </div>
@@ -880,8 +890,8 @@ export default function App() {
                   <div key={option.roomId} className="pk-opt" onClick={() => resolveMove(moveModal.studentId, moveModal.blockKey, option.roomId)}>
                     <div className="pk-cl" style={{ background: subject?.color || "#999" }} />
                     <div className="pk-i">
-                      <div className="pk-sn">{room?.name}</div>
-                      <div className="pk-mt">{courseLabel(course)} · {course?.teacherName}</div>
+                      <div className="pk-sn">{room ? roomLabel(room.name) : ""}</div>
+                      <div className="pk-mt">{courseLabel(course, lang)} · {personLabel(course?.teacherName || "")}</div>
                       <div className="pk-pt">{t.capacity}: {current}/{room?.capacity} → {after}/{room?.capacity}</div>
                     </div>
                     <div className="pk-lv" style={{ background: "#F0EDE8", color: "#6B665F" }}>{t.assign}</div>

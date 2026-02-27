@@ -1,10 +1,11 @@
 import { SUBJECTS } from "./constants";
+import { getSubjectLabelFromT, getT } from "./i18n";
 import type { Course, Student } from "./types";
 
-export function courseLabel(course: Course | null | undefined) {
+export function courseLabel(course: Course | null | undefined, lang: "en" | "ar" = "en") {
   if (!course) return "";
-  const subject = SUBJECTS[course.subject];
-  let label = subject?.name || course.subject;
+  const t = getT(lang);
+  let label = getSubjectLabelFromT(t, course.subject);
   if (course.level) label += ` ${course.level}`;
   if (course.grade) label += ` G${course.grade}`;
   return label;

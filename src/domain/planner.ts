@@ -1,4 +1,5 @@
 import { DAYS, HOMEROOMS, LEVELS, SLOTS, SUBJECTS } from "./constants";
+import { getSubjectLabelFromT } from "./i18n";
 import { blockKeyForCourse, courseMatchesStudent } from "./rules";
 import type {
   Assignments,
@@ -236,6 +237,7 @@ export function computeMovement(
 
   const blockKey = blockKeyForCourse(course);
   const subject = SUBJECTS[course.subject];
+  const subjectLabel = getSubjectLabelFromT(t, course.subject);
   const roomStudents = students.filter((student) => student.homeroom === roomId);
 
   const inThisRoom = (student: Student) => {
@@ -277,7 +279,7 @@ export function computeMovement(
       if (options.length > 0) {
         mustMoveOut.push({
           ...student,
-          neededLabel: `Tahsili G${student.grade}`,
+          neededLabel: `${t.tahsiliLabel} ${t.grade} ${student.grade}`,
           options,
           resolved: moveResolutions?.[student.id]?.[blockKey],
         });
@@ -294,27 +296,27 @@ export function computeMovement(
       if (qudratOptions.length > 0) {
         mustMoveOut.push({
           ...student,
-          neededLabel: "Qudrat (not done)",
+          neededLabel: `${t.qudratLabel} (${t.notDone})`,
           options: qudratOptions,
           resolved: moveResolutions?.[student.id]?.[blockKey],
         });
       } else {
-        forcedStay.push({ ...student, reason: `${t.reasonNoSupply} (Qudrat)` });
+        forcedStay.push({ ...student, reason: `${t.reasonNoSupply} (${t.qudratLabel})` });
       }
       continue;
     }
 
     if (options.length > 0) {
-      const need = subject.leveled ? student.needs[course.subject as "kammi" | "lafthi" | "esl"] : `G${student.grade}`;
+      const need = subject.leveled ? student.needs[course.subject as "kammi" | "lafthi" | "esl"] : `${t.grade} ${student.grade}`;
       mustMoveOut.push({
         ...student,
-        neededLabel: `${SUBJECTS[course.subject].name} ${need}`,
+        neededLabel: `${subjectLabel} ${need}`,
         options,
         resolved: moveResolutions?.[student.id]?.[blockKey],
       });
     } else {
-      const need = subject.leveled ? student.needs[course.subject as "kammi" | "lafthi" | "esl"] : `G${student.grade}`;
-      forcedStay.push({ ...student, reason: `${t.reasonNoSupply} (${SUBJECTS[course.subject].name} ${need})` });
+      const need = subject.leveled ? student.needs[course.subject as "kammi" | "lafthi" | "esl"] : `${t.grade} ${student.grade}`;
+      forcedStay.push({ ...student, reason: `${t.reasonNoSupply} (${subjectLabel} ${need})` });
     }
   }
 
