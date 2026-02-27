@@ -635,18 +635,14 @@ export default function AppV6() {
 
                                 return (
                                   <td key={level} className="step0-level-cell" style={{ verticalAlign: "top", paddingBottom: 12 }}>
-                                    <div className="step0-toggle-row">
-                                      <span className="step0-level-count">{baseCount} students</span>
-                                      <button
-                                        type="button"
-                                        className={cx("ios-toggle", run && "on")}
-                                        onClick={() => toggleRunLevel(subject, level)}
-                                        aria-label={`${subjectLabel(subject)} ${level} ${run ? "enabled" : "disabled"}`}
-                                        aria-pressed={run}
-                                      >
-                                        <span className="ios-toggle-knob" />
-                                      </button>
-                                    </div>
+                                    <div className="step0-level-count">{baseCount} students</div>
+                                    <button
+                                      type="button"
+                                      className={cx("level-toggle", "step0-level-toggle", run && "on")}
+                                      onClick={() => toggleRunLevel(subject, level)}
+                                    >
+                                      Run
+                                    </button>
 
                                     <div style={{ marginTop: 8 }}>
                                       <button
