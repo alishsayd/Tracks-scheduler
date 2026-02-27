@@ -13,12 +13,8 @@
       if (window.location.protocol === "file:") {
         document.getElementById("root").innerHTML =
           "<h1>Tracks Scheduler Admin</h1><p>This source file cannot run directly from file://.</p><p>Use <code>npm run dev</code> and open <code>http://localhost:5173/admin/</code>, or open the built site from GitHub Pages.</p>";
-      } else {
-        const script = document.createElement("script");
-        script.type = "module";
-        script.src = "/src/admin/main.tsx";
-        document.body.appendChild(script);
       }
     </script>
+    <script type="module" src="/src/admin/main.tsx"></script>
   </body>
 </html>
