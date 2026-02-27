@@ -59,6 +59,19 @@ function defaultRoutingPlans(): Record<LeveledSubject, SubjectRoutingPlan> {
   };
 }
 
+function buildInitialRoutingPlans(students: typeof INIT_STUDENTS): Record<LeveledSubject, SubjectRoutingPlan> {
+  const plans = defaultRoutingPlans();
+
+  for (const subject of LEVELED_SUBJECTS) {
+    for (const level of LEVELS) {
+      const count = students.filter((student) => !student.done[subject] && student.needs[subject] === level).length;
+      plans[subject].run[level] = count > 10;
+    }
+  }
+
+  return plans;
+}
+
 function defaultForceMovePanels() {
   return {
     kammi: { L1: false, L2: false, L3: false },
@@ -103,7 +116,7 @@ export default function AppV6() {
   const [showProfile, setShowProfile] = useState(true);
 
   const [selectedStreams, setSelectedStreams] = useState<SelectedStreams>({});
-  const [routingPlans, setRoutingPlans] = useState<Record<LeveledSubject, SubjectRoutingPlan>>(() => defaultRoutingPlans());
+  const [routingPlans, setRoutingPlans] = useState<Record<LeveledSubject, SubjectRoutingPlan>>(() => buildInitialRoutingPlans(INIT_STUDENTS));
   const [forceMovePanels, setForceMovePanels] = useState(defaultForceMovePanels);
   const [hostOverrides, setHostOverrides] = useState<Record<LeveledSubject, Partial<Record<number, RoomHost>>>>({
     kammi: {},
@@ -622,14 +635,18 @@ export default function AppV6() {
 
                                 return (
                                   <td key={level} className="step0-level-cell" style={{ verticalAlign: "top", paddingBottom: 12 }}>
-                                    <div className="step0-level-count">{baseCount} students</div>
-                                    <button
-                                      type="button"
-                                      className={cx("level-toggle", "step0-level-toggle", run && "on")}
-                                      onClick={() => toggleRunLevel(subject, level)}
-                                    >
-                                      Run
-                                    </button>
+                                    <div className="step0-toggle-row">
+                                      <span className="step0-level-count">{baseCount} students</span>
+                                      <button
+                                        type="button"
+                                        className={cx("ios-toggle", run && "on")}
+                                        onClick={() => toggleRunLevel(subject, level)}
+                                        aria-label={`${subjectLabel(subject)} ${level} ${run ? "enabled" : "disabled"}`}
+                                        aria-pressed={run}
+                                      >
+                                        <span className="ios-toggle-knob" />
+                                      </button>
+                                    </div>
 
                                     <div style={{ marginTop: 8 }}>
                                       <button

@@ -247,6 +247,49 @@ body {
   color: #1a1a1a;
 }
 
+.step0-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ios-toggle {
+  width: 42px;
+  height: 24px;
+  border: none;
+  border-radius: 999px;
+  background: #D1D5DB;
+  padding: 2px;
+  cursor: pointer;
+  transition: background .14s ease;
+  display: inline-flex;
+  align-items: center;
+}
+
+.ios-toggle.on {
+  background: #34C759;
+}
+
+.ios-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ios-toggle-knob {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transform: translateX(0);
+  transition: transform .14s ease;
+}
+
+.ios-toggle.on .ios-toggle-knob {
+  transform: translateX(18px);
+}
+
 .level-action-count {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
