@@ -116,6 +116,16 @@ export default function AppV6() {
   const roomLabel = useCallback((roomName: string) => localizeRoomName(lang, roomName), [lang]);
   const personLabel = useCallback((name: string) => localizePersonName(lang, name), [lang]);
   const segmentLabel = useCallback((segment: string | null) => localizeSegment(lang, segment), [lang]);
+  const fmt = useCallback(
+    (key: string, vars: Record<string, string | number>) => {
+      let message = t[key] || key;
+      for (const [name, value] of Object.entries(vars)) {
+        message = message.split(`{${name}}`).join(String(value));
+      }
+      return message;
+    },
+    [t]
+  );
 
   const [students] = useState(INIT_STUDENTS);
   const [courses] = useState(INIT_COURSES);
@@ -193,13 +203,13 @@ export default function AppV6() {
     for (const subject of LEVELED_SUBJECTS) {
       const streamId = selectedStreams[subject];
       if (!streamId) {
-        issues[subject].push("Select a bundle.");
+        issues[subject].push(t.stepIssueSelectBundle);
         continue;
       }
 
       const preview = subjectPreviews[subject];
       if (!preview) {
-        issues[subject].push("Room map is missing.");
+        issues[subject].push(t.stepIssueRoomMapMissing);
         continue;
       }
 
@@ -207,13 +217,13 @@ export default function AppV6() {
       for (const level of preview.levelsRunning) {
         const hasRoom = hostRows.some((row) => row.host === level);
         if (!hasRoom) {
-          issues[subject].push(`Missing room allocation for ${level}.`);
+          issues[subject].push(fmt("stepIssueMissingLevelRoom", { level }));
         }
       }
     }
 
     return issues;
-  }, [selectedStreams, subjectPreviews]);
+  }, [selectedStreams, subjectPreviews, t, fmt]);
 
   const step1Complete = useMemo(() => LEVELED_SUBJECTS.every((subject) => step1Issues[subject].length === 0), [step1Issues]);
 
@@ -471,7 +481,7 @@ export default function AppV6() {
   const jumpBackToStep = useCallback(
     (target: 0 | 1) => {
       if (target === 0) {
-        if ((hasStep1Progress || hasStep2Progress || campusWhitelist) && !window.confirm("Go back to Step 0? This clears Step 1 and Step 2 progress.")) {
+        if ((hasStep1Progress || hasStep2Progress || campusWhitelist) && !window.confirm(t.confirmBackToStep0)) {
           return;
         }
         resetFromStep0();
@@ -480,14 +490,14 @@ export default function AppV6() {
         return;
       }
 
-      if ((hasStep2Progress || campusWhitelist) && !window.confirm("Go back to Step 1? This clears Step 2 progress.")) {
+      if ((hasStep2Progress || campusWhitelist) && !window.confirm(t.confirmBackToStep1)) {
         return;
       }
       resetFromStep1();
       setPage("campus");
       setActiveCampusStep(1);
     },
-    [hasStep1Progress, hasStep2Progress, campusWhitelist, resetFromStep0, resetFromStep1]
+    [hasStep1Progress, hasStep2Progress, campusWhitelist, resetFromStep0, resetFromStep1, t]
   );
 
   const applyCampusPlan = useCallback(() => {
@@ -813,7 +823,7 @@ export default function AppV6() {
         const movement = computeMovementForCell(selectedRoom, day, slot.id);
         if (movement.forcedStay.length > 0) {
           const reason = movement.forcedStay[0]?.reason ? ` (${movement.forcedStay[0].reason})` : "";
-          const line = `${movement.forcedStay.length} students forced to stay in ${courseLabel(course, lang)}${reason}.`;
+          const line = fmt("roomFlagForcedStay", { count: movement.forcedStay.length, course: courseLabel(course, lang), reason });
           if (!seen.has(line)) {
             seen.add(line);
             flags.push(line);
@@ -821,7 +831,7 @@ export default function AppV6() {
         }
 
         if (movement.effectiveHere > roomCapacity) {
-          const line = `${courseLabel(course, lang)} expected roster is ${movement.effectiveHere} students.`;
+          const line = fmt("roomFlagRosterOverflow", { course: courseLabel(course, lang), count: movement.effectiveHere });
           if (!seen.has(line)) {
             seen.add(line);
             flags.push(line);
@@ -831,7 +841,7 @@ export default function AppV6() {
     }
 
     return flags;
-  }, [campusWhitelist, assignments, selectedRoom, getCourse, computeMovementForCell, lang]);
+  }, [campusWhitelist, assignments, selectedRoom, getCourse, computeMovementForCell, lang, fmt]);
 
   const openManualMoveModal = useCallback(
     (studentId: string) => {
@@ -907,16 +917,16 @@ export default function AppV6() {
                   <div className="cycle-card current">
                     <div className="cycle-head">
                       <div>
-                        <div className="cycle-title">Spring 26 Semester</div>
-                        <div className="cycle-sub">Current cycle</div>
+                        <div className="cycle-title">{t.cycleCurrentTitle}</div>
+                        <div className="cycle-sub">{t.cycleCurrentSub}</div>
                       </div>
-                      <span className="cycle-status on">Current</span>
+                      <span className="cycle-status on">{t.cycleCurrentStatus}</span>
                     </div>
 
                     <div className="step-shell">
                       <div className="step-shell-head">
-                        <span>Step {activeCampusStep + 1} of 3</span>
-                        <span className="step-shell-sub">Guided setup. Editing earlier steps clears later progress.</span>
+                        <span>{fmt("cycleStepProgress", { step: activeCampusStep + 1 })}</span>
+                        <span className="step-shell-sub">{t.cycleStepGuidedSetup}</span>
                       </div>
                       <div className="step-track">
                         {[0, 1, 2].map((step) => (
@@ -935,11 +945,11 @@ export default function AppV6() {
                     {activeCampusStep > 0 && (
                       <div className="step-mini">
                         <div>
-                          <div className="step-mini-title">Step 0 complete</div>
-                          <div className="step-mini-copy">{step0ReadySubjectCount}/{LEVELED_SUBJECTS.length} subjects have running levels.</div>
+                          <div className="step-mini-title">{t.cycleStep0CompleteTitle}</div>
+                          <div className="step-mini-copy">{fmt("cycleStep0CompleteCopy", { ready: step0ReadySubjectCount, total: LEVELED_SUBJECTS.length })}</div>
                         </div>
                         <button className="step-mini-btn" onClick={() => jumpBackToStep(0)}>
-                          Edit Step 0
+                          {t.cycleEditStep0}
                         </button>
                       </div>
                     )}
@@ -947,20 +957,20 @@ export default function AppV6() {
                     {activeCampusStep > 1 && (
                       <div className="step-mini">
                         <div>
-                          <div className="step-mini-title">Step 1 complete</div>
-                          <div className="step-mini-copy">{selectedStreamCount}/{LEVELED_SUBJECTS.length} bundle maps selected.</div>
+                          <div className="step-mini-title">{t.cycleStep1CompleteTitle}</div>
+                          <div className="step-mini-copy">{fmt("cycleStep1CompleteCopy", { selected: selectedStreamCount, total: LEVELED_SUBJECTS.length })}</div>
                         </div>
                         <button className="step-mini-btn" onClick={() => jumpBackToStep(1)}>
-                          Edit Step 1
+                          {t.cycleEditStep1}
                         </button>
                       </div>
                     )}
 
                     {activeCampusStep === 0 && (
                       <div className="card step-focus">
-                        <div className="card-t">Step 0 — Qudrat status and level demand</div>
+                        <div className="card-t">{t.v6Step0Title}</div>
                         <div className="step-inline-note" style={{ marginBottom: 10 }}>
-                          {g12DoneQCount} students are not included in Kammi/Lafthi counts below because they are done with Qudrat.
+                          {fmt("v6DoneQExcludedNote", { count: g12DoneQCount })}
                         </div>
 
                         <div style={{ overflowX: "auto" }}>
@@ -974,7 +984,7 @@ export default function AppV6() {
                             <thead>
                               <tr>
                                 <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>
-                                  Subject
+                                  {t.subject}
                                 </th>
                                 <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L1</th>
                                 <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L2</th>
@@ -992,7 +1002,10 @@ export default function AppV6() {
                                     <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", whiteSpace: "nowrap", verticalAlign: "top" }}>
                                       <div style={{ fontSize: 12, fontWeight: 900, color: subjectDef.color }}>{subjectLabel(subject)}</div>
                                       <div className="step-inline-note" style={{ marginTop: 6 }}>
-                                        {LEVELS.filter((level) => routing.run[level]).length}/3 levels running · {demand.mergedCount} force-moved
+                                        {fmt("step0LevelsRunningSummary", {
+                                          running: LEVELS.filter((level) => routing.run[level]).length,
+                                          moved: demand.mergedCount,
+                                        })}
                                       </div>
                                     </td>
                                     {LEVELS.map((level) => {
@@ -1009,14 +1022,14 @@ export default function AppV6() {
 
                                       return (
                                         <td key={level} className="step0-level-cell" style={{ verticalAlign: "top", paddingBottom: 12 }}>
-                                          <div className="step0-level-count">{baseCount} students</div>
+                                          <div className="step0-level-count">{baseCount} {t.studentsCount}</div>
                                           <label className="step0-run-check">
-                                            <span>Activate</span>
+                                            <span>{t.activate}</span>
                                             <input
                                               type="checkbox"
                                               checked={run}
                                               onChange={() => toggleRunLevel(subject, level)}
-                                              aria-label={`Activate ${subject} ${level}`}
+                                              aria-label={`${t.activate} ${subjectLabel(subject)} ${level}`}
                                             />
                                           </label>
 
@@ -1031,7 +1044,7 @@ export default function AppV6() {
                                               }}
                                               style={run ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
                                             >
-                                              {level === "L2" ? "Split" : "Force move"}
+                                              {level === "L2" ? t.split : t.forceMove}
                                             </button>
                                           </div>
 
@@ -1040,7 +1053,7 @@ export default function AppV6() {
                                               {level === "L2" ? (
                                                 <>
                                                   <label style={{ fontSize: 11, color: "#6B665F" }}>
-                                                    Move to L1
+                                                    {t.moveToL1}
                                                     <input
                                                       type="number"
                                                       min={0}
@@ -1051,7 +1064,7 @@ export default function AppV6() {
                                                     />
                                                   </label>
                                                   <label style={{ fontSize: 11, color: "#6B665F" }}>
-                                                    Move to L3
+                                                    {t.moveToL3}
                                                     <input
                                                       type="number"
                                                       min={0}
@@ -1065,7 +1078,7 @@ export default function AppV6() {
                                               ) : (
                                                 <>
                                                   <label style={{ fontSize: 11, color: "#6B665F" }}>
-                                                    Destination
+                                                    {t.destination}
                                                     <select
                                                       value={routing.forceMove[level].target}
                                                       onChange={(event) => setSingleForceMoveTarget(subject, level as "L1" | "L3", event.target.value as Level)}
@@ -1079,7 +1092,7 @@ export default function AppV6() {
                                                     </select>
                                                   </label>
                                                   <label style={{ fontSize: 11, color: "#6B665F" }}>
-                                                    Students to move
+                                                    {t.studentsToMove}
                                                     <input
                                                       type="number"
                                                       min={0}
@@ -1092,7 +1105,7 @@ export default function AppV6() {
                                                 </>
                                               )}
                                               <span style={{ fontSize: 10, color: "#6B665F", fontWeight: 700 }}>
-                                                {remaining} remain in {level}
+                                                {fmt("remainInLevel", { count: remaining, level })}
                                               </span>
                                             </div>
                                           )}
@@ -1108,12 +1121,12 @@ export default function AppV6() {
 
                         <div className="step-inline-note" style={{ marginTop: 10 }}>
                           {step0Complete
-                            ? "Ready for Step 1."
-                            : `${step0ReadySubjectCount}/${LEVELED_SUBJECTS.length} subjects have at least one running level.`}
+                            ? t.readyForStep1
+                            : fmt("step0ProgressLine", { ready: step0ReadySubjectCount, total: LEVELED_SUBJECTS.length })}
                         </div>
                         <div className="step-actions">
                           <button className="apply-btn" disabled={!step0Complete} onClick={() => setActiveCampusStep(1)}>
-                            Continue to Step 1
+                            {t.continueToStep1}
                           </button>
                         </div>
                       </div>
@@ -1121,7 +1134,7 @@ export default function AppV6() {
 
                     {activeCampusStep === 1 && (
                       <div className="card step-focus">
-                        <div className="card-t">Step 1 — Bundle and room map</div>
+                        <div className="card-t">{t.v6Step1Title}</div>
 
                         {LEVELED_SUBJECTS.map((subject) => {
                           const subjectDef = SUBJECTS[subject];
@@ -1144,7 +1157,7 @@ export default function AppV6() {
                                   >
                                     <div className="so-radio">{picked && <div className="so-dot" />}</div>
                                     <div className="so-info">
-                                      <div className="so-slot">Slot {group.slot} · {group.slotLabel}</div>
+                                      <div className="so-slot">{fmt("slotLabelWithValue", { slot: group.slot })} · {group.slotLabel}</div>
                                       <div className="so-pattern">{patternLabel(group.pattern)}</div>
                                       <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
                                         {LEVELS.map((level) => {
@@ -1174,20 +1187,20 @@ export default function AppV6() {
                                   <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
                                     <thead>
                                       <tr>
-                                        <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", background: "#F5F3EE" }}>Room</th>
-                                        <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", background: "#F5F3EE" }}>Host</th>
-                                        <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", background: "#F5F3EE" }}>Projected roster</th>
+                                        <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", background: "#F5F3EE" }}>{t.roomHeader}</th>
+                                        <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", background: "#F5F3EE" }}>{t.hostHeader}</th>
+                                        <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", background: "#F5F3EE" }}>{t.projectedRosterHeader}</th>
                                       </tr>
                                     </thead>
                                     <tbody>
                                       {preview.rows.map((row, index) => (
                                         <tr key={`${subject}-${row.roomId}`} style={{ background: index % 2 ? "#FAFAF7" : "#fff" }}>
                                           <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", whiteSpace: "nowrap" }}>
-                                            {roomLabel(row.roomName)} <span style={{ color: "#94908A", fontSize: 10 }}>G{row.grade}</span>
+                                            {roomLabel(row.roomName)} <span style={{ color: "#94908A", fontSize: 10 }}>{t.grade} {row.grade}</span>
                                           </td>
                                           <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8" }}>
                                             {row.fixed ? (
-                                              <span style={{ fontWeight: 700, color: "#6B665F" }}>Tahsili (auto)</span>
+                                              <span style={{ fontWeight: 700, color: "#6B665F" }}>{t.tahsiliAuto}</span>
                                             ) : (
                                               <select
                                                 value={row.host}
@@ -1203,7 +1216,7 @@ export default function AppV6() {
                                             )}
                                           </td>
                                           <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11 }}>
-                                            {row.effectiveCount} students
+                                            {fmt("roomProjectedStudents", { count: row.effectiveCount })}
                                           </td>
                                         </tr>
                                       ))}
@@ -1214,14 +1227,18 @@ export default function AppV6() {
 
                               {preview ? (
                                 <div className="step-inline-note" style={{ marginTop: 8 }}>
-                                  {preview.summary.stay} stay · {preview.summary.move} move · {preview.summary.forcedStays} forced stays
+                                  {fmt("step1Summary", {
+                                    stay: preview.summary.stay,
+                                    move: preview.summary.move,
+                                    forced: preview.summary.forcedStays,
+                                  })}
                                   {preview.summary.worstRoom
-                                    ? ` · max roster ${preview.summary.worstRoom.effective} students`
+                                    ? ` · ${fmt("maxRosterSummary", { count: preview.summary.worstRoom.effective })}`
                                     : ""}
                                 </div>
                               ) : (
                                 <div className="step-inline-note" style={{ marginTop: 8 }}>
-                                  Choose a bundle to generate a room map.
+                                  {t.chooseBundleRoomMap}
                                 </div>
                               )}
 
@@ -1240,12 +1257,12 @@ export default function AppV6() {
 
                         <div className="step-inline-note">
                           {step1Complete
-                            ? "Ready for Step 2."
-                            : `Bundles selected: ${selectedStreamCount}/${LEVELED_SUBJECTS.length}. Allocate all running levels.`}
+                            ? t.readyForStep2
+                            : fmt("step1ProgressLine", { selected: selectedStreamCount, total: LEVELED_SUBJECTS.length })}
                         </div>
                         <div className="step-actions">
                           <button className="apply-btn" disabled={!step1Complete} onClick={() => setActiveCampusStep(2)}>
-                            Continue to Step 2
+                            {t.continueToStep2}
                           </button>
                         </div>
                       </div>
@@ -1294,22 +1311,32 @@ export default function AppV6() {
                                         let conflictNote = "";
                                         if (blockedByLeveled) {
                                           const firstBlockedMeeting = course.meetings.find((meeting) => meetingBlockedByLeveled(grade, course, meeting));
-                                          let blockingLeveledLabel = "leveled course";
+                                          let blockingLeveledLabel = t.leveledCourseLabel;
                                           if (firstBlockedMeeting) {
                                             const leveledConflict = blockingLeveledSubjectForMeeting(grade, course, firstBlockedMeeting);
                                             if (leveledConflict) blockingLeveledLabel = subjectLabel(leveledConflict);
                                           }
                                           if (firstBlockedMeeting) {
-                                            conflictNote = `Blocked by ${blockingLeveledLabel} on ${dayLabel(firstBlockedMeeting.day)} · ${t.slot} ${firstBlockedMeeting.slot}.`;
+                                            conflictNote = fmt("blockedByOnSlot", {
+                                              label: blockingLeveledLabel,
+                                              day: dayLabel(firstBlockedMeeting.day),
+                                              slotLabel: t.slot,
+                                              slot: firstBlockedMeeting.slot,
+                                            });
                                           } else {
-                                            conflictNote = `Blocked by ${blockingLeveledLabel}.`;
+                                            conflictNote = fmt("blockedByLabel", { label: blockingLeveledLabel });
                                           }
                                         }
                                         if (!conflictNote && blockedBySelectedGradeWide && conflictingGradeWide && conflictingGradeWideMeeting) {
-                                          conflictNote = `Blocked by ${courseLabel(conflictingGradeWide, lang)} on ${dayLabel(conflictingGradeWideMeeting.day)} · ${t.slot} ${conflictingGradeWideMeeting.slot}.`;
+                                          conflictNote = fmt("blockedByOnSlot", {
+                                            label: courseLabel(conflictingGradeWide, lang),
+                                            day: dayLabel(conflictingGradeWideMeeting.day),
+                                            slotLabel: t.slot,
+                                            slot: conflictingGradeWideMeeting.slot,
+                                          });
                                         }
                                         if (!conflictNote && blocked) {
-                                          conflictNote = "Blocked due to a slot conflict.";
+                                          conflictNote = t.blockedDueToConflict;
                                         }
                                         return (
                                           <div key={course.id} className="gcr-option-wrap">
@@ -1333,7 +1360,7 @@ export default function AppV6() {
                                               <button
                                                 type="button"
                                                 className="gcr-info"
-                                                aria-label="Why this option is disabled"
+                                                aria-label={t.whyOptionDisabled}
                                                 title={conflictNote}
                                                 onClick={() => window.alert(conflictNote)}
                                               >
@@ -1353,10 +1380,10 @@ export default function AppV6() {
 
                         <div className="step-inline-note">
                           {step2Ready
-                            ? "Ready to apply."
+                            ? t.readyToApply
                             : step2HardBlocked
-                              ? "Resolve schedule conflicts before applying."
-                              : `${selectedGradeOfferings}/${requiredGradeOfferings.length} selections completed.`}
+                              ? t.resolveConflictsBeforeApply
+                              : fmt("step2SelectionsCompleted", { selected: selectedGradeOfferings, total: requiredGradeOfferings.length })}
                         </div>
                         {step2HardBlocked ? (
                           <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
@@ -1365,8 +1392,15 @@ export default function AppV6() {
                                 key={`${issue.reason}-${issue.grade}-${issue.subject}-${issue.courseId}-${issue.day}-${issue.slotId}`}
                                 style={{ fontSize: 11, color: "#B91C1C", fontWeight: 700 }}
                               >
-                                {t.grade} {issue.grade} · {subjectLabel(issue.subject)} · {dayLabel(issue.day)} · {t.slot} {issue.slotId} ·{" "}
-                                {issue.reason === "leveled" ? "conflicts with leveled plan" : "conflicts with another grade-wide selection"}
+                                {fmt("step2IssueLine", {
+                                  gradeLabel: t.grade,
+                                  grade: issue.grade,
+                                  subject: subjectLabel(issue.subject),
+                                  day: dayLabel(issue.day),
+                                  slotLabel: t.slot,
+                                  slot: issue.slotId,
+                                  reason: issue.reason === "leveled" ? t.conflictsWithLeveledPlan : t.conflictsWithGradeWide,
+                                })}
                               </span>
                             ))}
                           </div>
@@ -1383,16 +1417,16 @@ export default function AppV6() {
                       <>
                         <div className="step-mini done">
                           <div>
-                            <div className="step-mini-title">Step 2 complete</div>
-                            <div className="step-mini-copy">All required grade-wide selections are valid.</div>
+                            <div className="step-mini-title">{t.step2CompleteTitle}</div>
+                            <div className="step-mini-copy">{t.step2CompleteCopy}</div>
                           </div>
                           <button className="step-mini-btn" onClick={() => setStep2Collapsed(false)}>
-                            Edit Step 2
+                            {t.editStep2}
                           </button>
                         </div>
                         <div className="card step-focus">
-                          <div className="card-t">Ready to apply</div>
-                          <div className="step-inline-note">This cycle setup is complete. Apply to seed homeroom schedules.</div>
+                          <div className="card-t">{t.cycleReadyTitle}</div>
+                          <div className="step-inline-note">{t.cycleReadyCopy}</div>
                           <div className="step-actions">
                             <button className="apply-btn" onClick={applyCampusPlan} disabled={!campusFlowComplete || computedWhitelist.size === 0}>
                               {t.apply}
@@ -1405,13 +1439,13 @@ export default function AppV6() {
                   <div className="cycle-card upcoming">
                     <div className="cycle-head">
                       <div>
-                        <div className="cycle-title">Fall 26 Semester</div>
-                        <div className="cycle-sub">Upcoming cycle</div>
+                        <div className="cycle-title">{t.cycleUpcomingTitle}</div>
+                        <div className="cycle-sub">{t.cycleUpcomingSub}</div>
                       </div>
-                      <span className="cycle-status off">Upcoming</span>
+                      <span className="cycle-status off">{t.cycleUpcomingStatus}</span>
                     </div>
                     <div className="cycle-locked-copy">
-                      This cycle is not open yet. HQ will open it when scheduling starts.
+                      {t.cycleLockedCopy}
                     </div>
                   </div>
                 </div>
@@ -1446,9 +1480,9 @@ export default function AppV6() {
                 ) : null}
 
                 <div className="room-flags">
-                  <div className="room-flags-title">Room flags</div>
+                  <div className="room-flags-title">{t.roomFlagsTitle}</div>
                   {roomFlags.length === 0 ? (
-                    <div className="room-flags-empty">No active issues in this room.</div>
+                    <div className="room-flags-empty">{t.roomFlagsEmpty}</div>
                   ) : (
                     <ul>
                       {roomFlags.map((flag) => (
@@ -1544,8 +1578,8 @@ export default function AppV6() {
                   {step2Conflicts.length > 0 && (
                     <div className="rc">
                       <div className="rc-hd">
-                        <span className="rc-d">Step 2 overwrite conflicts</span>
-                        <span className="rc-sl">Manual reconciliation required</span>
+                        <span className="rc-d">{t.step2OverwriteConflicts}</span>
+                        <span className="rc-sl">{t.manualReconciliationRequired}</span>
                         <span className="rc-c">{step2Conflicts.length}</span>
                       </div>
                       <div className="rc-bd">
@@ -1561,7 +1595,7 @@ export default function AppV6() {
                               </span>
                                 <span className="sr-g">{dayLabel(conflict.day)} {slot?.start}</span>
                                 <span style={{ fontSize: 10, color: "#94908A" }}>
-                                  {previousCourse ? courseLabel(previousCourse, lang) : "Unknown"} {"->"} {nextCourse ? courseLabel(nextCourse, lang) : "Unknown"}
+                                  {previousCourse ? courseLabel(previousCourse, lang) : t.unknown} {"->"} {nextCourse ? courseLabel(nextCourse, lang) : t.unknown}
                                 </span>
                               </div>
                             );
@@ -1656,7 +1690,7 @@ export default function AppV6() {
                         disabled={manualOverrideOptions.length === 0}
                         onClick={() => openManualMoveModal(student.id)}
                       >
-                        Move
+                        {t.moveAction}
                       </button>
                     </div>
                   ))}
@@ -1726,7 +1760,7 @@ export default function AppV6() {
                           disabled={manualOverrideOptions.length === 0}
                           onClick={() => openManualMoveModal(student.id)}
                         >
-                          Move
+                          {t.moveAction}
                         </button>
                       </div>
                     ))
@@ -1748,7 +1782,7 @@ export default function AppV6() {
                           disabled={manualOverrideOptions.length === 0}
                           onClick={() => openManualMoveModal(student.id)}
                         >
-                          Move
+                          {t.moveAction}
                         </button>
                       </div>
                     ))
