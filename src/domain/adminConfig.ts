@@ -11,15 +11,20 @@ export interface LevelDistribution {
   L1: number;
   L2: number;
   L3: number;
-  done: number;
 }
 
 export type GradeTotals = Record<AdminGrade, number>;
 export type SubjectDistributions = Record<LeveledSubject, Record<AdminGrade, LevelDistribution>>;
 
+export interface DoneRates {
+  qudrat: Record<AdminGrade, number>;
+  esl: Record<AdminGrade, number>;
+}
+
 export interface AdminConfig {
   roomCount: number;
   gradeTotals: GradeTotals;
+  doneRates: DoneRates;
   subjectDistributions: SubjectDistributions;
 }
 
@@ -42,21 +47,25 @@ const DEFAULT_CONFIG: AdminConfig = {
     11: 44,
     12: 18,
   },
+  doneRates: {
+    qudrat: { 10: 0, 11: 0, 12: 65 },
+    esl: { 10: 0, 11: 0, 12: 0 },
+  },
   subjectDistributions: {
     kammi: {
-      10: { L1: 50, L2: 40, L3: 10, done: 0 },
-      11: { L1: 25, L2: 45, L3: 30, done: 0 },
-      12: { L1: 4, L2: 12, L3: 19, done: 65 },
+      10: { L1: 50, L2: 40, L3: 10 },
+      11: { L1: 25, L2: 45, L3: 30 },
+      12: { L1: 10, L2: 35, L3: 55 },
     },
     lafthi: {
-      10: { L1: 50, L2: 45, L3: 5, done: 0 },
-      11: { L1: 20, L2: 50, L3: 30, done: 0 },
-      12: { L1: 2, L2: 14, L3: 19, done: 65 },
+      10: { L1: 50, L2: 45, L3: 5 },
+      11: { L1: 20, L2: 50, L3: 30 },
+      12: { L1: 5, L2: 40, L3: 55 },
     },
     esl: {
-      10: { L1: 55, L2: 40, L3: 5, done: 0 },
-      11: { L1: 30, L2: 50, L3: 20, done: 0 },
-      12: { L1: 15, L2: 45, L3: 40, done: 0 },
+      10: { L1: 55, L2: 40, L3: 5 },
+      11: { L1: 30, L2: 50, L3: 20 },
+      12: { L1: 15, L2: 45, L3: 40 },
     },
   },
 };
@@ -66,7 +75,6 @@ function cloneLevelDistribution(input: LevelDistribution): LevelDistribution {
     L1: input.L1,
     L2: input.L2,
     L3: input.L3,
-    done: input.done,
   };
 }
 
@@ -74,6 +82,10 @@ function cloneConfig(input: AdminConfig): AdminConfig {
   return {
     roomCount: input.roomCount,
     gradeTotals: { ...input.gradeTotals },
+    doneRates: {
+      qudrat: { ...input.doneRates.qudrat },
+      esl: { ...input.doneRates.esl },
+    },
     subjectDistributions: {
       kammi: {
         10: cloneLevelDistribution(input.subjectDistributions.kammi[10]),
@@ -107,15 +119,54 @@ function clampPercent(value: unknown, fallback: number) {
   return n;
 }
 
+function normalizeToHundred(values: [number, number, number]): [number, number, number] {
+  const total = values[0] + values[1] + values[2];
+  if (total <= 0) return [0, 0, 100];
+
+  const normalized = values.map((value) => (value / total) * 100);
+  const floored = normalized.map((value) => Math.floor(value));
+  let remainder = 100 - (floored[0] + floored[1] + floored[2]);
+
+  const order = normalized
+    .map((value, index) => ({ index, fraction: value - floored[index] }))
+    .sort((a, b) => b.fraction - a.fraction);
+
+  for (let i = 0; i < order.length && remainder > 0; i += 1) {
+    floored[order[i].index] += 1;
+    remainder -= 1;
+  }
+
+  return [floored[0], floored[1], floored[2]];
+}
+
+function normalizeLevelDistribution(raw: any, fallback: LevelDistribution): LevelDistribution {
+  const l1 = clampPercent(raw?.L1, fallback.L1);
+  const l2 = clampPercent(raw?.L2, fallback.L2);
+  const l3 = clampPercent(raw?.L3, fallback.L3);
+  const sum = l1 + l2 + l3;
+
+  if (sum === 100) return { L1: l1, L2: l2, L3: l3 };
+
+  // Migrate legacy rows where L1/L2/L3 + done = 100.
+  const legacyDone = raw && Object.prototype.hasOwnProperty.call(raw, "done") ? clampPercent(raw.done, 0) : null;
+  if (legacyDone !== null && sum > 0 && sum + legacyDone === 100) {
+    const [n1, n2, n3] = normalizeToHundred([l1, l2, l3]);
+    return { L1: n1, L2: n2, L3: n3 };
+  }
+
+  return cloneLevelDistribution(fallback);
+}
+
 function normalizeConfig(raw: unknown): AdminConfig {
   const defaults = getDefaultAdminConfig();
   if (!raw || typeof raw !== "object") return defaults;
 
-  const obj = raw as Partial<AdminConfig>;
+  const obj = raw as Partial<AdminConfig> & { doneRates?: any; subjectDistributions?: any };
 
   const roomCount = asInt(obj.roomCount, defaults.roomCount);
   const gradeTotalsRaw = obj.gradeTotals || defaults.gradeTotals;
   const subjectRaw = obj.subjectDistributions || defaults.subjectDistributions;
+  const doneRaw = obj.doneRates || {};
 
   const gradeTotals: GradeTotals = {
     10: Math.max(0, asInt(gradeTotalsRaw[10], defaults.gradeTotals[10])),
@@ -123,72 +174,49 @@ function normalizeConfig(raw: unknown): AdminConfig {
     12: Math.max(0, asInt(gradeTotalsRaw[12], defaults.gradeTotals[12])),
   };
 
-  const subjectDistributions: SubjectDistributions = {
-    kammi: {
-      10: {
-        L1: clampPercent(subjectRaw.kammi?.[10]?.L1, defaults.subjectDistributions.kammi[10].L1),
-        L2: clampPercent(subjectRaw.kammi?.[10]?.L2, defaults.subjectDistributions.kammi[10].L2),
-        L3: clampPercent(subjectRaw.kammi?.[10]?.L3, defaults.subjectDistributions.kammi[10].L3),
-        done: clampPercent(subjectRaw.kammi?.[10]?.done, defaults.subjectDistributions.kammi[10].done),
-      },
-      11: {
-        L1: clampPercent(subjectRaw.kammi?.[11]?.L1, defaults.subjectDistributions.kammi[11].L1),
-        L2: clampPercent(subjectRaw.kammi?.[11]?.L2, defaults.subjectDistributions.kammi[11].L2),
-        L3: clampPercent(subjectRaw.kammi?.[11]?.L3, defaults.subjectDistributions.kammi[11].L3),
-        done: clampPercent(subjectRaw.kammi?.[11]?.done, defaults.subjectDistributions.kammi[11].done),
-      },
-      12: {
-        L1: clampPercent(subjectRaw.kammi?.[12]?.L1, defaults.subjectDistributions.kammi[12].L1),
-        L2: clampPercent(subjectRaw.kammi?.[12]?.L2, defaults.subjectDistributions.kammi[12].L2),
-        L3: clampPercent(subjectRaw.kammi?.[12]?.L3, defaults.subjectDistributions.kammi[12].L3),
-        done: clampPercent(subjectRaw.kammi?.[12]?.done, defaults.subjectDistributions.kammi[12].done),
-      },
-    },
-    lafthi: {
-      10: {
-        L1: clampPercent(subjectRaw.lafthi?.[10]?.L1, defaults.subjectDistributions.lafthi[10].L1),
-        L2: clampPercent(subjectRaw.lafthi?.[10]?.L2, defaults.subjectDistributions.lafthi[10].L2),
-        L3: clampPercent(subjectRaw.lafthi?.[10]?.L3, defaults.subjectDistributions.lafthi[10].L3),
-        done: clampPercent(subjectRaw.lafthi?.[10]?.done, defaults.subjectDistributions.lafthi[10].done),
-      },
-      11: {
-        L1: clampPercent(subjectRaw.lafthi?.[11]?.L1, defaults.subjectDistributions.lafthi[11].L1),
-        L2: clampPercent(subjectRaw.lafthi?.[11]?.L2, defaults.subjectDistributions.lafthi[11].L2),
-        L3: clampPercent(subjectRaw.lafthi?.[11]?.L3, defaults.subjectDistributions.lafthi[11].L3),
-        done: clampPercent(subjectRaw.lafthi?.[11]?.done, defaults.subjectDistributions.lafthi[11].done),
-      },
-      12: {
-        L1: clampPercent(subjectRaw.lafthi?.[12]?.L1, defaults.subjectDistributions.lafthi[12].L1),
-        L2: clampPercent(subjectRaw.lafthi?.[12]?.L2, defaults.subjectDistributions.lafthi[12].L2),
-        L3: clampPercent(subjectRaw.lafthi?.[12]?.L3, defaults.subjectDistributions.lafthi[12].L3),
-        done: clampPercent(subjectRaw.lafthi?.[12]?.done, defaults.subjectDistributions.lafthi[12].done),
-      },
+  const legacyQDone = (grade: AdminGrade) => {
+    const fromKammi = subjectRaw?.kammi?.[grade]?.done;
+    const fromLafthi = subjectRaw?.lafthi?.[grade]?.done;
+    return clampPercent(fromKammi ?? fromLafthi, defaults.doneRates.qudrat[grade]);
+  };
+
+  const legacyEslDone = (grade: AdminGrade) => clampPercent(subjectRaw?.esl?.[grade]?.done, defaults.doneRates.esl[grade]);
+
+  const doneRates: DoneRates = {
+    qudrat: {
+      10: clampPercent(doneRaw?.qudrat?.[10], legacyQDone(10)),
+      11: clampPercent(doneRaw?.qudrat?.[11], legacyQDone(11)),
+      12: clampPercent(doneRaw?.qudrat?.[12], legacyQDone(12)),
     },
     esl: {
-      10: {
-        L1: clampPercent(subjectRaw.esl?.[10]?.L1, defaults.subjectDistributions.esl[10].L1),
-        L2: clampPercent(subjectRaw.esl?.[10]?.L2, defaults.subjectDistributions.esl[10].L2),
-        L3: clampPercent(subjectRaw.esl?.[10]?.L3, defaults.subjectDistributions.esl[10].L3),
-        done: clampPercent(subjectRaw.esl?.[10]?.done, defaults.subjectDistributions.esl[10].done),
-      },
-      11: {
-        L1: clampPercent(subjectRaw.esl?.[11]?.L1, defaults.subjectDistributions.esl[11].L1),
-        L2: clampPercent(subjectRaw.esl?.[11]?.L2, defaults.subjectDistributions.esl[11].L2),
-        L3: clampPercent(subjectRaw.esl?.[11]?.L3, defaults.subjectDistributions.esl[11].L3),
-        done: clampPercent(subjectRaw.esl?.[11]?.done, defaults.subjectDistributions.esl[11].done),
-      },
-      12: {
-        L1: clampPercent(subjectRaw.esl?.[12]?.L1, defaults.subjectDistributions.esl[12].L1),
-        L2: clampPercent(subjectRaw.esl?.[12]?.L2, defaults.subjectDistributions.esl[12].L2),
-        L3: clampPercent(subjectRaw.esl?.[12]?.L3, defaults.subjectDistributions.esl[12].L3),
-        done: clampPercent(subjectRaw.esl?.[12]?.done, defaults.subjectDistributions.esl[12].done),
-      },
+      10: clampPercent(doneRaw?.esl?.[10], legacyEslDone(10)),
+      11: clampPercent(doneRaw?.esl?.[11], legacyEslDone(11)),
+      12: clampPercent(doneRaw?.esl?.[12], legacyEslDone(12)),
+    },
+  };
+
+  const subjectDistributions: SubjectDistributions = {
+    kammi: {
+      10: normalizeLevelDistribution(subjectRaw?.kammi?.[10], defaults.subjectDistributions.kammi[10]),
+      11: normalizeLevelDistribution(subjectRaw?.kammi?.[11], defaults.subjectDistributions.kammi[11]),
+      12: normalizeLevelDistribution(subjectRaw?.kammi?.[12], defaults.subjectDistributions.kammi[12]),
+    },
+    lafthi: {
+      10: normalizeLevelDistribution(subjectRaw?.lafthi?.[10], defaults.subjectDistributions.lafthi[10]),
+      11: normalizeLevelDistribution(subjectRaw?.lafthi?.[11], defaults.subjectDistributions.lafthi[11]),
+      12: normalizeLevelDistribution(subjectRaw?.lafthi?.[12], defaults.subjectDistributions.lafthi[12]),
+    },
+    esl: {
+      10: normalizeLevelDistribution(subjectRaw?.esl?.[10], defaults.subjectDistributions.esl[10]),
+      11: normalizeLevelDistribution(subjectRaw?.esl?.[11], defaults.subjectDistributions.esl[11]),
+      12: normalizeLevelDistribution(subjectRaw?.esl?.[12], defaults.subjectDistributions.esl[12]),
     },
   };
 
   return {
     roomCount: Math.max(1, roomCount),
     gradeTotals,
+    doneRates,
     subjectDistributions,
   };
 }
@@ -284,22 +312,37 @@ export function validateAdminConfig(config: AdminConfig): AdminConfigValidation 
     errors.push("At least one grade must have students.");
   }
 
+  for (const doneType of ["qudrat", "esl"] as const) {
+    for (const grade of GRADES as AdminGrade[]) {
+      const value = config.doneRates[doneType][grade];
+      if (!Number.isInteger(value) || value < 0 || value > 100) {
+        errors.push(`${doneType.toUpperCase()} Grade ${grade} done rate must be between 0% and 100%.`);
+      }
+      if (grade === 10 && value !== 0) {
+        errors.push(`${doneType.toUpperCase()} Grade 10 done rate must stay 0%.`);
+      }
+    }
+  }
+
   for (const subject of ["kammi", "lafthi", "esl"] as const) {
     for (const grade of GRADES as AdminGrade[]) {
       const dist = config.subjectDistributions[subject][grade];
-      const sum = dist.L1 + dist.L2 + dist.L3 + dist.done;
+      const sum = dist.L1 + dist.L2 + dist.L3;
       if (sum !== 100) {
-        errors.push(`${subject.toUpperCase()} Grade ${grade} distribution must add up to 100%.`);
-      }
-      if (grade === 10 && dist.done !== 0) {
-        errors.push(`${subject.toUpperCase()} Grade 10 Done must stay 0%.`);
+        errors.push(`${subject.toUpperCase()} Grade ${grade} L1/L2/L3 must add up to 100%.`);
       }
     }
   }
 
   const allocation = computeRoomAllocation(config);
   if (!allocation) {
-    errors.push(`Room count is infeasible. At least ${Math.ceil(config.gradeTotals[10] / MAX_ROOM_CAPACITY) + Math.ceil(config.gradeTotals[11] / MAX_ROOM_CAPACITY) + Math.ceil(config.gradeTotals[12] / MAX_ROOM_CAPACITY)} rooms are required to keep all grades separate and <= ${MAX_ROOM_CAPACITY} students per room.`);
+    errors.push(
+      `Room count is infeasible. At least ${
+        Math.ceil(config.gradeTotals[10] / MAX_ROOM_CAPACITY) +
+        Math.ceil(config.gradeTotals[11] / MAX_ROOM_CAPACITY) +
+        Math.ceil(config.gradeTotals[12] / MAX_ROOM_CAPACITY)
+      } rooms are required to keep all grades separate and <= ${MAX_ROOM_CAPACITY} students per room.`
+    );
     return { errors, warnings, allocation: null };
   }
 

@@ -1,6 +1,6 @@
 import { DAYS, GRADES, LEVELS, SLOTS } from "./constants";
 import { buildRoomStudentTargets, type AdminConfig } from "./adminConfig";
-import type { Course, Day, Homeroom, Level, LeveledSubject, StreamGroup, Student, SubjectKey } from "./types";
+import type { Course, Day, Homeroom, Level, StreamGroup, Student, SubjectKey } from "./types";
 
 const TEACHERS = [
   "Abdullah Al-Qahtani",
@@ -46,13 +46,8 @@ function pickWeighted<T>(rand: () => number, values: T[], weights: number[]) {
   return values[values.length - 1];
 }
 
-function pickSubjectOutcome(rand: () => number, dist: AdminConfig["subjectDistributions"][LeveledSubject][10]) {
-  const bucket = pickWeighted(rand, ["L1", "L2", "L3", "done"] as const, [dist.L1, dist.L2, dist.L3, dist.done]);
-  if (bucket === "done") {
-    const level = pickWeighted(rand, LEVELS, [dist.L1, dist.L2, dist.L3]);
-    return { level, done: true };
-  }
-  return { level: bucket, done: false };
+function pickLevel(rand: () => number, dist: AdminConfig["subjectDistributions"]["kammi"][10]) {
+  return pickWeighted(rand, LEVELS, [dist.L1, dist.L2, dist.L3]);
 }
 
 export function genStudents(homerooms: Homeroom[], config: AdminConfig) {
@@ -91,13 +86,15 @@ export function genStudents(homerooms: Homeroom[], config: AdminConfig) {
 
     for (let i = 0; i < roomCount; i++) {
       const name = `${first[(hr.id * 13 + i) % first.length]} ${last[(hr.id * 7 + i) % last.length]}`;
-      const kammiOutcome = pickSubjectOutcome(r, config.subjectDistributions.kammi[grade]);
-      const lafthiOutcome = pickSubjectOutcome(r, config.subjectDistributions.lafthi[grade]);
-      const eslOutcome = pickSubjectOutcome(r, config.subjectDistributions.esl[grade]);
+      const doneQRate = config.doneRates.qudrat[grade] / 100;
+      const doneEslRate = config.doneRates.esl[grade] / 100;
+      const doneQ = grade === 10 ? false : r() < doneQRate;
+      const doneEsl = grade === 10 ? false : r() < doneEslRate;
+
       const done = {
-        kammi: grade === 10 ? false : kammiOutcome.done,
-        lafthi: grade === 10 ? false : lafthiOutcome.done,
-        esl: grade === 10 ? false : eslOutcome.done,
+        kammi: doneQ,
+        lafthi: doneQ,
+        esl: doneEsl,
       };
 
       students.push({
@@ -108,9 +105,9 @@ export function genStudents(homerooms: Homeroom[], config: AdminConfig) {
         doneQ: done.kammi && done.lafthi,
         done,
         needs: {
-          kammi: kammiOutcome.level,
-          lafthi: lafthiOutcome.level,
-          esl: eslOutcome.level,
+          kammi: pickLevel(r, config.subjectDistributions.kammi[grade]),
+          lafthi: pickLevel(r, config.subjectDistributions.lafthi[grade]),
+          esl: pickLevel(r, config.subjectDistributions.esl[grade]),
         },
         strength: r(),
       });

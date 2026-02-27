@@ -51,7 +51,20 @@ export function AdminApp() {
     }));
   };
 
-  const setDistribution = (subject: LeveledSubject, grade: AdminGrade, field: "L1" | "L2" | "L3" | "done", value: string) => {
+  const setDoneRate = (subject: "qudrat" | "esl", grade: AdminGrade, value: string) => {
+    setDraft((prev) => ({
+      ...prev,
+      doneRates: {
+        ...prev.doneRates,
+        [subject]: {
+          ...prev.doneRates[subject],
+          [grade]: Math.max(0, Math.min(100, toInt(value, prev.doneRates[subject][grade]))),
+        },
+      },
+    }));
+  };
+
+  const setDistribution = (subject: LeveledSubject, grade: AdminGrade, field: "L1" | "L2" | "L3", value: string) => {
     setDraft((prev) => ({
       ...prev,
       subjectDistributions: {
@@ -113,8 +126,58 @@ export function AdminApp() {
       </section>
 
       <section className="admin-card">
+        <h2>Done Status by Grade (%)</h2>
+        <p>Student-level status. If a student is done with Qudrat, they are done with both Kammi and Lafthi. Grade 10 is locked to 0%.</p>
+
+        <table className="admin-table">
+          <thead>
+            <tr>
+              <th>Subject</th>
+              <th>Grade 10</th>
+              <th>Grade 11</th>
+              <th>Grade 12</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Done with Qudrat</td>
+              {GRADES.map((grade) => (
+                <td key={`done-qudrat-${grade}`}>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={draft.doneRates.qudrat[grade]}
+                    disabled={grade === 10}
+                    onChange={(event) => setDoneRate("qudrat", grade, event.target.value)}
+                  />
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td>Done with ESL</td>
+              {GRADES.map((grade) => (
+                <td key={`done-esl-${grade}`}>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={draft.doneRates.esl[grade]}
+                    disabled={grade === 10}
+                    onChange={(event) => setDoneRate("esl", grade, event.target.value)}
+                  />
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section className="admin-card">
         <h2>Distribution by Subject and Grade (%)</h2>
-        <p>Each row must sum to 100. Grade 10 “Done” is locked to 0.</p>
+        <p>Each row must sum to 100 across L1/L2/L3.</p>
 
         {SUBJECTS.map((subject) => (
           <div key={subject.key} className="admin-subject-block">
@@ -126,14 +189,13 @@ export function AdminApp() {
                   <th>L1</th>
                   <th>L2</th>
                   <th>L3</th>
-                  <th>Done</th>
                   <th>Total</th>
                 </tr>
               </thead>
               <tbody>
                 {GRADES.map((grade) => {
                   const row = draft.subjectDistributions[subject.key][grade];
-                  const sum = row.L1 + row.L2 + row.L3 + row.done;
+                  const sum = row.L1 + row.L2 + row.L3;
                   return (
                     <tr key={`${subject.key}-${grade}`}>
                       <td>Grade {grade}</td>
@@ -145,17 +207,6 @@ export function AdminApp() {
                       </td>
                       <td>
                         <input type="number" min={0} max={100} step={1} value={row.L3} onChange={(event) => setDistribution(subject.key, grade, "L3", event.target.value)} />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          step={1}
-                          value={row.done}
-                          disabled={grade === 10}
-                          onChange={(event) => setDistribution(subject.key, grade, "done", event.target.value)}
-                        />
                       </td>
                       <td className={sum === 100 ? "ok" : "bad"}>{sum}%</td>
                     </tr>
