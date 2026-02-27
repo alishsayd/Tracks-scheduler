@@ -329,7 +329,12 @@ export default function App() {
                       </colgroup>
                       <thead>
                         <tr>
-                          <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>{t.subject}</th>
+                          <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>
+                            <div className="step0-subject-head">
+                              <span>{t.subject}</span>
+                              <span className="step0-subject-question">{t.step0ActionTitle}</span>
+                            </div>
+                          </th>
                           <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L1</th>
                           <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L2</th>
                           <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L3</th>
@@ -339,71 +344,45 @@ export default function App() {
                         {LEVELED_SUBJECTS.map((subject, index) => {
                           const dist = campusDemand.totals[subject];
                           const subjectDef = SUBJECTS[subject];
+                          const selectedCount = LEVELS.filter((level) => levelOpen[subject][level] !== false).length;
                           return (
                             <tr key={subject} style={{ background: index % 2 ? "#FAFAF7" : "#fff" }}>
-                              <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontSize: 12, fontWeight: 900, color: subjectDef.color, whiteSpace: "nowrap" }}>{subjectLabel(subject)}</td>
-                              <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L1}</td>
-                              <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L2}</td>
-                              <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L3}</td>
+                              <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", whiteSpace: "nowrap" }}>
+                                <div className="step0-subject-cell">
+                                  <span style={{ fontSize: 12, fontWeight: 900, color: subjectDef.color }}>{subjectLabel(subject)}</span>
+                                  <span className={cx("level-action-count", selectedCount >= 2 && "ok")}>
+                                    {selectedCount}/{LEVELS.length} {t.levelsSelected}
+                                  </span>
+                                </div>
+                              </td>
+                              {LEVELS.map((level) => {
+                                const open = levelOpen[subject][level] !== false;
+                                return (
+                                  <td key={level} className="step0-level-cell">
+                                    <div className="step0-level-count">{dist[level]}</div>
+                                    <button
+                                      type="button"
+                                      className={cx("level-toggle", "step0-level-toggle", open && "on")}
+                                      onClick={() =>
+                                        setLevelOpen((prev) => ({
+                                          ...prev,
+                                          [subject]: {
+                                            ...prev[subject],
+                                            [level]: !open,
+                                          },
+                                        }))
+                                      }
+                                    >
+                                      {t.run}
+                                    </button>
+                                  </td>
+                                );
+                              })}
                             </tr>
                           );
                         })}
                       </tbody>
                     </table>
-                  </div>
-
-                  <div className="level-action">
-                    <div className="level-action-title">{t.step0ActionTitle}</div>
-                    <div style={{ overflowX: "auto" }}>
-                      <table className="level-action-table">
-                        <colgroup>
-                          <col style={{ width: "50%" }} />
-                          <col style={{ width: "16.666%" }} />
-                          <col style={{ width: "16.666%" }} />
-                          <col style={{ width: "16.666%" }} />
-                        </colgroup>
-                        <tbody>
-                          {LEVELED_SUBJECTS.map((subject, index) => {
-                            const subjectDef = SUBJECTS[subject];
-                            const selectedCount = LEVELS.filter((level) => levelOpen[subject][level] !== false).length;
-                            return (
-                              <tr key={subject} style={{ background: index % 2 ? "#F7F5F1" : "transparent" }}>
-                                <td className="level-action-subject-cell">
-                                  <div className="level-action-subject">
-                                    <span style={{ color: subjectDef.color }}>{subjectLabel(subject)}</span>
-                                    <span className={cx("level-action-count", selectedCount >= 2 && "ok")}>
-                                      {selectedCount}/{LEVELS.length} {t.levelsSelected}
-                                    </span>
-                                  </div>
-                                </td>
-                                {LEVELS.map((level) => {
-                                  const open = levelOpen[subject][level] !== false;
-                                  return (
-                                    <td key={level} className="level-action-toggle-cell">
-                                      <button
-                                        type="button"
-                                        className={cx("level-toggle", open && "on")}
-                                        onClick={() =>
-                                          setLevelOpen((prev) => ({
-                                            ...prev,
-                                            [subject]: {
-                                              ...prev[subject],
-                                              [level]: !open,
-                                            },
-                                          }))
-                                        }
-                                      >
-                                        {t.run}
-                                      </button>
-                                    </td>
-                                  );
-                                })}
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
                   </div>
 
                   <div className={cx("step-status", step0Complete && "ok")}>

@@ -213,46 +213,38 @@ body {
   color: #6B665F;
 }
 
-.level-action {
-  margin-top: 12px;
-  border: 1px solid #E8E4DD;
-  border-radius: 8px;
-  background: #FAFAF7;
-  padding: 10px 12px;
+.step0-subject-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
 }
 
-.level-action-title {
-  font-size: 12px;
-  font-weight: 800;
-  color: #3f3a34;
-  margin-bottom: 8px;
+.step0-subject-question {
+  font-size: 11px;
+  font-weight: 500;
+  color: #94908A;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
-.level-action-table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-}
-
-.level-action-table td {
-  border-top: 1px solid #ECE8E2;
-  padding: 10px;
-}
-
-.level-action-table tr:first-child td {
-  border-top: 1px solid #ECE8E2;
-}
-
-.level-action-subject-cell {
-  text-align: start;
-}
-
-.level-action-subject {
+.step0-subject-cell {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.step0-level-cell {
+  padding: 8px 10px;
+  border-bottom: 1px solid #F0EDE8;
+}
+
+.step0-level-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
   font-weight: 800;
+  color: #1a1a1a;
 }
 
 .level-action-count {
@@ -270,10 +262,6 @@ body {
   color: #059669;
 }
 
-.level-action-toggle-cell {
-  text-align: center;
-}
-
 .level-toggle {
   border: 1px solid #E8E4DD;
   background: #fff;
@@ -284,6 +272,11 @@ body {
   font-weight: 900;
   cursor: pointer;
   font-family: 'JetBrains Mono', monospace;
+}
+
+.step0-level-toggle {
+  margin-top: 6px;
+  min-width: 58px;
 }
 
 .level-toggle.on {
