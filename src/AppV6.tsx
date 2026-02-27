@@ -10,7 +10,6 @@ import {
   computeMovement,
   getAssignment,
   getAvailableCourses,
-  roomProfile,
   scheduleStats,
   unresolvedMoves,
   type GradeCourseSelections,
@@ -132,7 +131,6 @@ export default function AppV6() {
 
   const [sidePanel, setSidePanel] = useState<SidePanelState | null>(null);
   const [moveModal, setMoveModal] = useState<MoveModalState | null>(null);
-  const [showProfile, setShowProfile] = useState(true);
 
   const [selectedStreams, setSelectedStreams] = useState<SelectedStreams>({});
   const [routingPlans, setRoutingPlans] = useState<Record<LeveledSubject, SubjectRoutingPlan>>(() => buildInitialRoutingPlans(INIT_STUDENTS));
@@ -750,7 +748,6 @@ export default function AppV6() {
   );
 
   const stats = useMemo(() => scheduleStats(assignments, unresolved.length, HOMEROOMS), [assignments, unresolved.length]);
-  const profile = useMemo(() => roomProfile(students, selectedRoom, HOMEROOMS), [students, selectedRoom]);
 
   const sidePanelData = useMemo(() => {
     if (!sidePanel) return null;
@@ -763,6 +760,76 @@ export default function AppV6() {
       movement: computeMovementForCell(selectedRoom, sidePanel.day, sidePanel.slotId),
     };
   }, [sidePanel, selectedRoom, assignments, getCourse, computeMovementForCell]);
+
+  const buildManualOverrideOptions = useCallback(
+    (day: Day, slotId: number, sourceRoomId: number) => {
+      const options: Array<{ roomId: number; courseId: string }> = [];
+      for (const room of HOMEROOMS) {
+        if (room.id === sourceRoomId) continue;
+        const courseId = getAssignment(assignments, room.id, day, slotId);
+        if (!courseId) continue;
+        if (campusWhitelist && !campusWhitelist.has(courseId)) continue;
+        options.push({ roomId: room.id, courseId });
+      }
+      return options;
+    },
+    [assignments, campusWhitelist]
+  );
+
+  const manualOverrideOptions = useMemo(() => {
+    if (!sidePanel) return [];
+    return buildManualOverrideOptions(sidePanel.day, sidePanel.slotId, selectedRoom);
+  }, [sidePanel, selectedRoom, buildManualOverrideOptions]);
+
+  const roomFlags = useMemo(() => {
+    if (!campusWhitelist) return [];
+    const flags: string[] = [];
+    const seen = new Set<string>();
+    const roomCapacity = HOMEROOMS[selectedRoom].capacity;
+
+    for (const day of DAYS) {
+      for (const slot of SLOTS) {
+        const assignment = getAssignment(assignments, selectedRoom, day, slot.id);
+        if (!assignment) continue;
+        const course = getCourse(assignment);
+        if (!course) continue;
+
+        const movement = computeMovementForCell(selectedRoom, day, slot.id);
+        if (movement.forcedStay.length > 0) {
+          const reason = movement.forcedStay[0]?.reason ? ` (${movement.forcedStay[0].reason})` : "";
+          const line = `${movement.forcedStay.length} students forced to stay in ${courseLabel(course, lang)}${reason}.`;
+          if (!seen.has(line)) {
+            seen.add(line);
+            flags.push(line);
+          }
+        }
+
+        if (movement.effectiveHere > roomCapacity) {
+          const line = `${courseLabel(course, lang)} expected roster is ${movement.effectiveHere} students.`;
+          if (!seen.has(line)) {
+            seen.add(line);
+            flags.push(line);
+          }
+        }
+      }
+    }
+
+    return flags;
+  }, [campusWhitelist, assignments, selectedRoom, getCourse, computeMovementForCell, lang]);
+
+  const openManualMoveModal = useCallback(
+    (studentId: string) => {
+      if (!sidePanel || !sidePanelData || manualOverrideOptions.length === 0) return;
+      setMoveModal({
+        studentId,
+        day: sidePanel.day,
+        slotId: sidePanel.slotId,
+        options: manualOverrideOptions,
+        blockKey: sidePanelData.movement.blockKey,
+      });
+    },
+    [sidePanel, sidePanelData, manualOverrideOptions]
+  );
 
   return (
     <div dir={dir}>
@@ -1293,7 +1360,6 @@ export default function AppV6() {
                         onClick={() => {
                           setSelectedRoom(room.id);
                           setSidePanel(null);
-                          setShowProfile(true);
                         }}
                       >
                         {roomLabel(room.name)} <span style={{ fontSize: 10, opacity: 0.5 }}>{t.grade} {room.grade}</span> <span className="rtab-n">{count}</span>
@@ -1309,45 +1375,16 @@ export default function AppV6() {
                   </div>
                 ) : null}
 
-                <div className="rp">
-                  <div className="rp-top" onClick={() => setShowProfile(!showProfile)}>
-                    <div className="rp-tl">
-                      {roomLabel(HOMEROOMS[selectedRoom].name)}
-                      <span className="rp-m">{t.grade} {profile.grade} · {profile.total} {t.studentsLabel}</span>
-                      {profile.qD > 0 && <span className="rp-tag" style={{ background: "#DEF7EC", color: "#059669" }}>✓{profile.qD} {t.doneQShort}</span>}
-                      {profile.qN > 0 && <span className="rp-tag" style={{ background: "#FEF3C7", color: "#B45309" }}>{profile.qN} {t.stillQShort}</span>}
-                    </div>
-                    <span className={cx("rp-arr", showProfile && "open")}>▼</span>
-                  </div>
-                  {showProfile && (
-                    <div className="rp-body">
-                      <div style={{ overflowX: "auto" }}>
-                        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
-                          <thead>
-                            <tr>
-                              <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>{t.subject}</th>
-                              <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L1</th>
-                              <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L2</th>
-                              <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L3</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {LEVELED_SUBJECTS.map((subject, index) => {
-                              const subjectDef = SUBJECTS[subject];
-                              const dist = profile.ld[subject];
-                              return (
-                                <tr key={subject} style={{ background: index % 2 ? "#FAFAF7" : "#fff" }}>
-                                  <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontSize: 12, fontWeight: 900, color: subjectDef.color, whiteSpace: "nowrap" }}>{subjectLabel(subject)}</td>
-                                  <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L1}</td>
-                                  <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L2}</td>
-                                  <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L3}</td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
+                <div className="room-flags">
+                  <div className="room-flags-title">Room flags</div>
+                  {roomFlags.length === 0 ? (
+                    <div className="room-flags-empty">No active issues in this room.</div>
+                  ) : (
+                    <ul>
+                      {roomFlags.map((flag) => (
+                        <li key={flag}>{flag}</li>
+                      ))}
+                    </ul>
                   )}
                 </div>
 
@@ -1541,7 +1578,17 @@ export default function AppV6() {
                 <div className="sp-sec">
                   <div className="sp-st">✅ {t.aligned} <span className="sp-cnt">{sidePanelData.movement.aligned.length}</span></div>
                   {sidePanelData.movement.aligned.map((student) => (
-                    <div key={student.id} className="sr"><span className="sr-n">{personLabel(student.name)}</span><span className="sr-g">{t.grade} {student.grade}</span></div>
+                    <div key={student.id} className="sr">
+                      <span className="sr-n">{personLabel(student.name)}</span>
+                      <span className="sr-g">{t.grade} {student.grade}</span>
+                      <button
+                        className="sr-btn"
+                        disabled={manualOverrideOptions.length === 0}
+                        onClick={() => openManualMoveModal(student.id)}
+                      >
+                        Move
+                      </button>
+                    </div>
                   ))}
                 </div>
 
@@ -1600,7 +1647,18 @@ export default function AppV6() {
                     <div style={{ fontSize: 12, color: "#94908A" }}>—</div>
                   ) : (
                     sidePanelData.movement.forcedStay.map((student) => (
-                      <div key={student.id} className="sr"><span className="sr-n">{personLabel(student.name)}</span><span className="sr-g">{t.grade} {student.grade}</span><span className="sr-r">{student.reason}</span></div>
+                      <div key={student.id} className="sr">
+                        <span className="sr-n">{personLabel(student.name)}</span>
+                        <span className="sr-g">{t.grade} {student.grade}</span>
+                        <span className="sr-r">{student.reason}</span>
+                        <button
+                          className="sr-btn"
+                          disabled={manualOverrideOptions.length === 0}
+                          onClick={() => openManualMoveModal(student.id)}
+                        >
+                          Move
+                        </button>
+                      </div>
                     ))
                   )}
                 </div>
@@ -1611,23 +1669,22 @@ export default function AppV6() {
                     <div style={{ fontSize: 12, color: "#94908A" }}>—</div>
                   ) : (
                     sidePanelData.movement.moveIns.map((student) => (
-                      <div key={student.id} className="sr"><span className="sr-n">{personLabel(student.name)}</span><span className="sr-g">{t.grade} {student.grade}</span><span className="sr-r">{t.from} {roomLabel(HOMEROOMS[student.homeroom]?.name || "")}</span></div>
+                      <div key={student.id} className="sr">
+                        <span className="sr-n">{personLabel(student.name)}</span>
+                        <span className="sr-g">{t.grade} {student.grade}</span>
+                        <span className="sr-r">{t.from} {roomLabel(HOMEROOMS[student.homeroom]?.name || "")}</span>
+                        <button
+                          className="sr-btn"
+                          disabled={manualOverrideOptions.length === 0}
+                          onClick={() => openManualMoveModal(student.id)}
+                        >
+                          Move
+                        </button>
+                      </div>
                     ))
                   )}
                 </div>
 
-                <div className="sp-sec">
-                  <div className="sp-st">{t.replaceCourse}</div>
-                  <button
-                    className="sr-btn"
-                    onClick={() => {
-                      setPicker({ day: sidePanel.day, slotId: sidePanel.slotId, mode: "replace" });
-                      setSidePanel(null);
-                    }}
-                  >
-                    {t.replaceCourse}
-                  </button>
-                </div>
               </div>
             </div>
           )}

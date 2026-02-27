@@ -650,6 +650,38 @@ body {
   margin-bottom: 12px;
 }
 
+.room-flags {
+  background: #fff;
+  border: 1px solid #E8E4DD;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.room-flags-title {
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.room-flags ul {
+  margin: 0;
+  padding-inline-start: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.room-flags li {
+  font-size: 11px;
+  color: #6B665F;
+}
+
+.room-flags-empty {
+  font-size: 11px;
+  color: #94908A;
+}
+
 .rp-top {
   display: flex;
   align-items: center;
@@ -1025,6 +1057,11 @@ body {
 
 .sr-btn.ok {
   background: #059669;
+}
+
+.sr-btn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
 }
 
 .ov {
