@@ -109,14 +109,9 @@ export default function App() {
 
   const [selectedStreams, setSelectedStreams] = useState<SelectedStreams>({});
   const [levelOpen, setLevelOpen] = useState<LevelOpenState>({
-    kammi: { L1: true, L2: true, L3: true },
-    lafthi: { L1: true, L2: true, L3: true },
-    esl: { L1: true, L2: true, L3: true },
-  });
-  const [levelDecisions, setLevelDecisions] = useState<Record<(typeof LEVELED_SUBJECTS)[number], boolean>>({
-    kammi: false,
-    lafthi: false,
-    esl: false,
+    kammi: { L1: false, L2: false, L3: false },
+    lafthi: { L1: false, L2: false, L3: false },
+    esl: { L1: false, L2: false, L3: false },
   });
   const [gradeCourseSelections, setGradeCourseSelections] = useState<GradeCourseSelections>({});
   const [campusWhitelist, setCampusWhitelist] = useState<Set<string> | null>(null);
@@ -131,28 +126,19 @@ export default function App() {
 
   const step0Complete = useMemo(
     () =>
-      LEVELED_SUBJECTS.every((subject) => {
-        const opened = LEVELS.filter((level) => levelOpen[subject][level] !== false).length;
-        return levelDecisions[subject] && opened >= 2;
-      }),
-    [levelDecisions, levelOpen]
-  );
-
-  const step0PendingDecisions = useMemo(
-    () => LEVELED_SUBJECTS.filter((subject) => !levelDecisions[subject]),
-    [levelDecisions]
-  );
-
-  const step0BelowMinimum = useMemo(
-    () =>
-      LEVELED_SUBJECTS.filter(
-        (subject) => LEVELS.filter((level) => levelOpen[subject][level] !== false).length < 2
+      LEVELED_SUBJECTS.every(
+        (subject) => LEVELS.filter((level) => levelOpen[subject][level] !== false).length >= 2
       ),
     [levelOpen]
   );
 
-  const step0DecidedCount = LEVELED_SUBJECTS.length - step0PendingDecisions.length;
-  const step0MinLevelCount = LEVELED_SUBJECTS.length - step0BelowMinimum.length;
+  const step0ReadySubjectCount = useMemo(
+    () =>
+      LEVELED_SUBJECTS.filter(
+        (subject) => LEVELS.filter((level) => levelOpen[subject][level] !== false).length >= 2
+      ).length,
+    [levelOpen]
+  );
 
   const step1Complete = useMemo(
     () => LEVELED_SUBJECTS.every((subject) => Boolean(selectedStreams[subject])),
@@ -378,7 +364,6 @@ export default function App() {
                           <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L1</th>
                           <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L2</th>
                           <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L3</th>
-                          <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>{t.decision}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -391,42 +376,6 @@ export default function App() {
                               <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L1}</td>
                               <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L2}</td>
                               <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L3}</td>
-                              <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8" }}>
-                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                  {LEVELS.map((level) => {
-                                    const open = levelOpen[subject][level] !== false;
-                                    return (
-                                      <button
-                                        key={level}
-                                        type="button"
-                                        onClick={() => {
-                                          setLevelOpen((prev) => ({
-                                            ...prev,
-                                            [subject]: {
-                                              ...prev[subject],
-                                              [level]: !open,
-                                            },
-                                          }));
-                                          setLevelDecisions((prev) => ({ ...prev, [subject]: true }));
-                                        }}
-                                        style={{
-                                          border: `1px solid ${open ? "#1a1a1a" : "#E8E4DD"}`,
-                                          background: open ? "#1a1a1a" : "#fff",
-                                          color: open ? "#fff" : "#6B665F",
-                                          borderRadius: 999,
-                                          padding: "4px 10px",
-                                          fontSize: 10,
-                                          fontWeight: 900,
-                                          cursor: "pointer",
-                                          fontFamily: "'JetBrains Mono',monospace",
-                                        }}
-                                      >
-                                        {level}: {open ? t.run : t.sacrifice}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </td>
                             </tr>
                           );
                         })}
@@ -434,10 +383,51 @@ export default function App() {
                     </table>
                   </div>
 
+                  <div className="level-action">
+                    <div className="level-action-title">{t.step0ActionTitle}</div>
+                    {LEVELED_SUBJECTS.map((subject) => {
+                      const subjectDef = SUBJECTS[subject];
+                      const selectedCount = LEVELS.filter((level) => levelOpen[subject][level] !== false).length;
+                      return (
+                        <div key={subject} className="level-action-row">
+                          <div className="level-action-subject">
+                            <span style={{ color: subjectDef.color }}>{subjectLabel(subject)}</span>
+                            <span className={cx("level-action-count", selectedCount >= 2 && "ok")}>
+                              {selectedCount}/{LEVELS.length} {t.levelsSelected}
+                            </span>
+                          </div>
+                          <div className="level-action-buttons">
+                            {LEVELS.map((level) => {
+                              const open = levelOpen[subject][level] !== false;
+                              return (
+                                <button
+                                  key={level}
+                                  type="button"
+                                  className={cx("level-toggle", open && "on")}
+                                  onClick={() =>
+                                    setLevelOpen((prev) => ({
+                                      ...prev,
+                                      [subject]: {
+                                        ...prev[subject],
+                                        [level]: !open,
+                                      },
+                                    }))
+                                  }
+                                >
+                                  {level}{open ? ` · ${t.run}` : ""}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
                   <div className={cx("step-status", step0Complete && "ok")}>
                     {step0Complete
                       ? t.step0Ready
-                      : `${t.step0NeedsDecision} ${step0DecidedCount}/${LEVELED_SUBJECTS.length} · ${t.step0NeedsTwoLevels} ${step0MinLevelCount}/${LEVELED_SUBJECTS.length}`}
+                      : `${t.step0NeedsTwoLevels} ${step0ReadySubjectCount}/${LEVELED_SUBJECTS.length}`}
                   </div>
                   <div style={{ marginTop: 10, fontSize: 11, color: "#6B665F" }}>{t.prototypePolicyG12}</div>
                 </div>
