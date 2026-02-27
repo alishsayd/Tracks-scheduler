@@ -67,6 +67,7 @@ export interface Course {
   segment: string | null;
   teacherName: string;
   startTime: string;
+  audienceTag?: "Qudrat_Done";
   meetings: Meeting[];
   pattern: string;
 }

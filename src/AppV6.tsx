@@ -28,6 +28,7 @@ import {
 import { courseLabel } from "./domain/rules";
 import type {
   Assignments,
+  Course,
   Day,
   Lang,
   MoveModalState,
@@ -238,9 +239,9 @@ export default function AppV6() {
     [requiredGradeOfferings.length, selectedGradeOfferings]
   );
 
-  const leveledBlockedByGrade = useMemo(() => {
-    const blocked: Record<number, Set<string>> = {};
-    for (const grade of GRADES) blocked[grade] = new Set<string>();
+  const leveledBlockersByGrade = useMemo(() => {
+    const blocked: Record<number, Map<string, Set<LeveledSubject>>> = {};
+    for (const grade of GRADES) blocked[grade] = new Map<string, Set<LeveledSubject>>();
 
     for (const subject of LEVELED_SUBJECTS) {
       const streamId = selectedStreams[subject];
@@ -254,15 +255,45 @@ export default function AppV6() {
       for (const room of HOMEROOMS) {
         const host = preview.hostByRoom[room.id];
         if (!host) continue;
-        if (!blocked[room.grade]) blocked[room.grade] = new Set<string>();
-        for (const key of toMeetingKeys(meetings)) {
-          blocked[room.grade].add(key);
+        for (const meeting of meetings) {
+          const key = meetingKey(meeting.day, meeting.slot);
+          const gradeBlockers = blocked[room.grade];
+          if (!gradeBlockers.has(key)) gradeBlockers.set(key, new Set<LeveledSubject>());
+          gradeBlockers.get(key)!.add(subject);
         }
       }
     }
 
     return blocked;
   }, [selectedStreams, subjectPreviews]);
+
+  const meetingBlockedByLeveled = useCallback(
+    (grade: number, course: Course, meeting: { day: Day; slot: number }) => {
+      const blockerSubjects = leveledBlockersByGrade[grade]?.get(meetingKey(meeting.day, meeting.slot));
+      if (!blockerSubjects || blockerSubjects.size === 0) return false;
+
+      if (grade === 12 && course.audienceTag === "Qudrat_Done") {
+        return [...blockerSubjects].some((subject) => SUBJECTS[subject].qudrat !== true);
+      }
+
+      return true;
+    },
+    [leveledBlockersByGrade]
+  );
+
+  const blockingLeveledSubjectForMeeting = useCallback(
+    (grade: number, course: Course, meeting: { day: Day; slot: number }) => {
+      const blockerSubjects = leveledBlockersByGrade[grade]?.get(meetingKey(meeting.day, meeting.slot));
+      if (!blockerSubjects || blockerSubjects.size === 0) return null;
+
+      if (grade === 12 && course.audienceTag === "Qudrat_Done") {
+        return [...blockerSubjects].find((subject) => SUBJECTS[subject].qudrat !== true) || null;
+      }
+
+      return [...blockerSubjects][0] || null;
+    },
+    [leveledBlockersByGrade]
+  );
 
   const step2BlockingIssues = useMemo(() => {
     const issues: Step2BlockingIssue[] = [];
@@ -287,7 +318,7 @@ export default function AppV6() {
         selectedByGrade[grade].push({ subject, courseId: course.id });
 
         for (const meeting of course.meetings) {
-          if (leveledBlockedByGrade[grade]?.has(meetingKey(meeting.day, meeting.slot))) {
+          if (meetingBlockedByLeveled(grade, course, meeting)) {
             pushIssue({
               grade,
               subject,
@@ -331,7 +362,7 @@ export default function AppV6() {
     }
 
     return issues;
-  }, [gradeCourseSelections, courses, leveledBlockedByGrade]);
+  }, [gradeCourseSelections, courses, meetingBlockedByLeveled]);
 
   useEffect(() => {
     setGradeCourseSelections((prev) => {
@@ -356,7 +387,7 @@ export default function AppV6() {
           }
 
           const keys = toMeetingKeys(selectedCourse.meetings);
-          const blockedByLeveled = keys.some((key) => leveledBlockedByGrade[grade]?.has(key));
+          const blockedByLeveled = selectedCourse.meetings.some((meeting) => meetingBlockedByLeveled(grade, selectedCourse, meeting));
           const blockedBySelected = keys.some((key) => occupied.has(key));
 
           if (blockedByLeveled || blockedBySelected) {
@@ -375,7 +406,7 @@ export default function AppV6() {
 
       return changed ? next : prev;
     });
-  }, [leveledBlockedByGrade, courses]);
+  }, [meetingBlockedByLeveled, courses]);
 
   const step2HardBlocked = step2BlockingIssues.length > 0;
   const step2Ready = step2Complete && !step2HardBlocked;
@@ -1145,7 +1176,7 @@ export default function AppV6() {
                                   {options.map((course) => {
                                     const isOn = selected === course.id;
                                     const optionMeetingKeys = new Set(toMeetingKeys(course.meetings));
-                                    const blockedByLeveled = [...optionMeetingKeys].some((key) => leveledBlockedByGrade[grade]?.has(key));
+                                    const blockedByLeveled = course.meetings.some((meeting) => meetingBlockedByLeveled(grade, course, meeting));
                                     let conflictingGradeWide: ReturnType<typeof getCourse> | null = null;
                                     let conflictingGradeWideMeeting: { day: Day; slot: number } | null = null;
                                     const blockedBySelectedGradeWide = Object.entries(gradeCourseSelections[grade] || {}).some(([otherSubject, otherCourseId]) => {
@@ -1162,17 +1193,10 @@ export default function AppV6() {
                                     const blocked = !isOn && (blockedByLeveled || blockedBySelectedGradeWide);
                                     let conflictNote = "";
                                     if (blockedByLeveled) {
-                                      const firstBlockedMeeting = course.meetings.find((meeting) => leveledBlockedByGrade[grade]?.has(meetingKey(meeting.day, meeting.slot)));
+                                      const firstBlockedMeeting = course.meetings.find((meeting) => meetingBlockedByLeveled(grade, course, meeting));
                                       let blockingLeveledLabel = "leveled course";
                                       if (firstBlockedMeeting) {
-                                        const leveledConflict = LEVELED_SUBJECTS.find((leveledSubject) => {
-                                          const streamId = selectedStreams[leveledSubject];
-                                          const preview = subjectPreviews[leveledSubject];
-                                          if (!streamId || !preview) return false;
-                                          const group = STREAM_GROUPS.find((entry) => entry.id === streamId);
-                                          if (!group?.courses[0]?.meetings.some((meeting) => meeting.day === firstBlockedMeeting.day && meeting.slot === firstBlockedMeeting.slot)) return false;
-                                          return HOMEROOMS.some((room) => room.grade === grade && Boolean(preview.hostByRoom[room.id]));
-                                        });
+                                        const leveledConflict = blockingLeveledSubjectForMeeting(grade, course, firstBlockedMeeting);
                                         if (leveledConflict) blockingLeveledLabel = subjectLabel(leveledConflict);
                                       }
                                       if (firstBlockedMeeting) {

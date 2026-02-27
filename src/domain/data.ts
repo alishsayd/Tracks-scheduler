@@ -132,7 +132,14 @@ export function genCourses() {
   const courses: Course[] = [];
   let cid = 1;
 
-  const mk = (subject: SubjectKey, level: Level | null, grade: number | null, meetings: Array<{ day: Day; slot: number }>, segment: string | null = null) => {
+  const mk = (
+    subject: SubjectKey,
+    level: Level | null,
+    grade: number | null,
+    meetings: Array<{ day: Day; slot: number }>,
+    segment: string | null = null,
+    audienceTag?: "Qudrat_Done"
+  ) => {
     const firstMeeting = meetings[0];
     const startTime = firstMeeting ? COURSE_START_BY_SLOT[firstMeeting.slot] || "07:45" : "07:45";
     const course: Course = {
@@ -143,6 +150,7 @@ export function genCourses() {
       segment,
       teacherName: nextTeacher(),
       startTime,
+      audienceTag,
       meetings,
       pattern: [...new Set(meetings.map((m) => m.day))].join("/"),
     };
@@ -166,9 +174,9 @@ export function genCourses() {
   for (const g of GRADES) mk("t_math", null, g, DAYS.map((d) => ({ day: d, slot: 7 })));
   for (const g of GRADES) mk("t_math", null, g, DAYS.map((d) => ({ day: d, slot: 6 })));
 
-  mk("t_physics", null, 12, ["Sun", "Tue"].map((d) => ({ day: d as Day, slot: 1 })));
-  mk("t_chem", null, 12, ["Mon", "Thu"].map((d) => ({ day: d as Day, slot: 2 })));
-  mk("t_bio", null, 12, ["Wed", "Thu"].map((d) => ({ day: d as Day, slot: 3 })));
+  mk("t_physics", null, 12, ["Sun", "Tue"].map((d) => ({ day: d as Day, slot: 1 })), null, "Qudrat_Done");
+  mk("t_chem", null, 12, ["Mon", "Thu"].map((d) => ({ day: d as Day, slot: 2 })), null, "Qudrat_Done");
+  mk("t_bio", null, 12, ["Wed", "Thu"].map((d) => ({ day: d as Day, slot: 3 })), null, "Qudrat_Done");
 
   return courses;
 }
