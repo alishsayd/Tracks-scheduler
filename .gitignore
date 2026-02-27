@@ -1,0 +1,12 @@
+# Build + deps
+node_modules/
+dist/
+
+# Vite
+.vite/
+
+# Editor / OS
+.DS_Store
+
+# Product context docs (keep local only)
+*.rtf

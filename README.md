@@ -1,33 +1,44 @@
-# Launchpad Site (GitHub Pages)
+# Tracks Scheduler
 
-This project is ready to deploy to GitHub Pages with GitHub Actions.
+Homeroom-first stream planner prototype rebuilt as a maintainable React + TypeScript app.
 
-## 1) Initialize and push
+## Run locally
 
-Run these commands in this folder:
+1. Install Node.js 20+
+2. Install dependencies
+   - `npm install`
+3. Start dev server
+   - `npm run dev`
 
-```bash
-git init
-git add .
-git commit -m "Initial website"
-git branch -M main
-git remote add origin https://github.com/YOUR_GITHUB_USERNAME/YOUR_REPOSITORY_NAME.git
-git push -u origin main
-```
+## Test
 
-## 2) Enable GitHub Pages
+- `npm run test`
 
-In your GitHub repository:
+## Build
 
-1. Open **Settings** -> **Pages**
-2. Under **Build and deployment**, choose **Source: GitHub Actions**
+- `npm run build`
 
-## 3) Get your link
+## Deployment
 
-After the workflow finishes, your site will be live at:
+GitHub Actions workflow at `.github/workflows/deploy.yml`:
 
-`https://YOUR_GITHUB_USERNAME.github.io/YOUR_REPOSITORY_NAME/`
+- installs dependencies
+- builds with Vite
+- deploys `dist/` to GitHub Pages
 
-If your repo name is `YOUR_GITHUB_USERNAME.github.io`, then the URL will be:
+The Vite `base` is derived from `GITHUB_REPOSITORY`, so it works on project pages.
 
-`https://YOUR_GITHUB_USERNAME.github.io/`
+## Project structure
+
+- `src/App.tsx`: main UX shell and orchestration
+- `src/domain/constants.ts`: static domain constants
+- `src/domain/data.ts`: seeded mock data + stream-group builder
+- `src/domain/rules.ts`: matching and labeling rules
+- `src/domain/planner.ts`: core planner/movement logic
+- `src/domain/i18n.ts`: English/Arabic copy
+- `src/domain/planner.test.ts`: domain tests
+- `src/styles/app.css`: UI styling
+
+## Safety
+
+`*.rtf` is ignored in `.gitignore` so local planning docs are never pushed.
