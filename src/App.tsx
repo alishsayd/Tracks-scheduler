@@ -1,5 +1,6 @@
-import { Fragment, useCallback, useMemo, useState } from "react";
-import { DAYS, GRADE_SUBJECTS, GRADES, HOMEROOMS, LEVELS, SLOTS, SUBJECTS } from "./domain/constants";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { DAYS, GRADE_SUBJECTS, GRADES, LEVELS, SLOTS, SUBJECTS } from "./domain/constants";
+import { buildHomerooms, getRuntimeAdminConfig } from "./domain/adminConfig";
 import { buildStreamGroups, genCourses, genStudents } from "./domain/data";
 import { formatDayPattern, getDayLabel, getSubjectLabelFromT, getT, localizePersonName, localizeRoomName, localizeSegment } from "./domain/i18n";
 import {
@@ -32,9 +33,12 @@ import type {
 } from "./domain/types";
 import "./styles/app.css";
 
-const INIT_STUDENTS = genStudents();
+const ADMIN_CONFIG = getRuntimeAdminConfig();
+const HOMEROOMS = buildHomerooms(ADMIN_CONFIG);
+const INIT_STUDENTS = genStudents(HOMEROOMS, ADMIN_CONFIG);
 const INIT_COURSES = genCourses();
 const STREAM_GROUPS = buildStreamGroups(INIT_COURSES);
+const LEVELED_SUBJECTS = ["lafthi", "kammi", "esl"] as const;
 
 function cx(...parts: Array<string | boolean | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -109,8 +113,14 @@ export default function App() {
     lafthi: { L1: true, L2: true, L3: true },
     esl: { L1: true, L2: true, L3: true },
   });
+  const [levelDecisions, setLevelDecisions] = useState<Record<(typeof LEVELED_SUBJECTS)[number], boolean>>({
+    kammi: false,
+    lafthi: false,
+    esl: false,
+  });
   const [gradeCourseSelections, setGradeCourseSelections] = useState<GradeCourseSelections>({});
   const [campusWhitelist, setCampusWhitelist] = useState<Set<string> | null>(null);
+  const [revealedStep, setRevealedStep] = useState(0);
 
   const getCourse = useCallback((courseId: string) => courses.find((course) => course.id === courseId), [courses]);
 
@@ -118,6 +128,73 @@ export default function App() {
     () => buildCampusWhitelist(selectedStreams, gradeCourseSelections, levelOpen, STREAM_GROUPS),
     [selectedStreams, gradeCourseSelections, levelOpen]
   );
+
+  const step0Complete = useMemo(
+    () =>
+      LEVELED_SUBJECTS.every((subject) => {
+        const opened = LEVELS.filter((level) => levelOpen[subject][level] !== false).length;
+        return levelDecisions[subject] && opened >= 2;
+      }),
+    [levelDecisions, levelOpen]
+  );
+
+  const step0PendingDecisions = useMemo(
+    () => LEVELED_SUBJECTS.filter((subject) => !levelDecisions[subject]),
+    [levelDecisions]
+  );
+
+  const step0BelowMinimum = useMemo(
+    () =>
+      LEVELED_SUBJECTS.filter(
+        (subject) => LEVELS.filter((level) => levelOpen[subject][level] !== false).length < 2
+      ),
+    [levelOpen]
+  );
+
+  const step0DecidedCount = LEVELED_SUBJECTS.length - step0PendingDecisions.length;
+  const step0MinLevelCount = LEVELED_SUBJECTS.length - step0BelowMinimum.length;
+
+  const step1Complete = useMemo(
+    () => LEVELED_SUBJECTS.every((subject) => Boolean(selectedStreams[subject])),
+    [selectedStreams]
+  );
+
+  const selectedStreamCount = useMemo(
+    () => LEVELED_SUBJECTS.filter((subject) => Boolean(selectedStreams[subject])).length,
+    [selectedStreams]
+  );
+
+  const requiredGradeOfferings = useMemo(() => {
+    const required: Array<{ grade: number; subject: SubjectKey }> = [];
+    for (const grade of GRADES) {
+      for (const subject of GRADE_SUBJECTS[grade].all as SubjectKey[]) {
+        const hasOptions = courses.some((course) => course.grade === grade && course.subject === subject);
+        if (hasOptions) required.push({ grade, subject });
+      }
+    }
+    return required;
+  }, [courses]);
+
+  const selectedGradeOfferings = useMemo(
+    () => requiredGradeOfferings.filter(({ grade, subject }) => Boolean(gradeCourseSelections[grade]?.[subject])).length,
+    [requiredGradeOfferings, gradeCourseSelections]
+  );
+
+  const step2Complete = useMemo(
+    () => requiredGradeOfferings.length > 0 && selectedGradeOfferings === requiredGradeOfferings.length,
+    [requiredGradeOfferings.length, selectedGradeOfferings]
+  );
+
+  const campusFlowComplete = step0Complete && step1Complete && step2Complete;
+
+  useEffect(() => {
+    setRevealedStep((prev) => {
+      let next = prev;
+      if (step0Complete) next = Math.max(next, 1);
+      if (step0Complete && step1Complete) next = Math.max(next, 2);
+      return next;
+    });
+  }, [step0Complete, step1Complete]);
 
   const applyCampusPlan = useCallback(() => {
     const whitelist = new Set(computedWhitelist);
@@ -131,7 +208,8 @@ export default function App() {
       gradeCourseSelections,
       students,
       courses,
-      STREAM_GROUPS
+      STREAM_GROUPS,
+      HOMEROOMS
     );
 
     setAssignments(seeded);
@@ -178,13 +256,13 @@ export default function App() {
 
   const getAvailable = useCallback(
     (day: Day, slotId: number, roomId: number) =>
-      getAvailableCourses(courses, campusWhitelist, assignments, day, slotId, roomId, subjectFilter),
+      getAvailableCourses(courses, campusWhitelist, assignments, day, slotId, roomId, subjectFilter, HOMEROOMS),
     [courses, campusWhitelist, assignments, subjectFilter]
   );
 
   const computeMovementForCell = useCallback(
     (roomId: number, day: Day, slotId: number) =>
-      computeMovement(roomId, day, slotId, assignments, courses, students, moveResolutions, campusWhitelist, t),
+      computeMovement(roomId, day, slotId, assignments, courses, students, moveResolutions, campusWhitelist, t, HOMEROOMS),
     [assignments, courses, students, moveResolutions, campusWhitelist, t]
   );
 
@@ -200,13 +278,13 @@ export default function App() {
   }, []);
 
   const unresolved = useMemo(
-    () => unresolvedMoves(assignments, courses, students, moveResolutions, campusWhitelist, t),
+    () => unresolvedMoves(assignments, courses, students, moveResolutions, campusWhitelist, t, HOMEROOMS),
     [assignments, courses, students, moveResolutions, campusWhitelist, t]
   );
 
-  const stats = useMemo(() => scheduleStats(assignments, unresolved.length), [assignments, unresolved.length]);
+  const stats = useMemo(() => scheduleStats(assignments, unresolved.length, HOMEROOMS), [assignments, unresolved.length]);
   const campusDemand = useMemo(() => demandSnapshot(students), [students]);
-  const profile = useMemo(() => roomProfile(students, selectedRoom), [students, selectedRoom]);
+  const profile = useMemo(() => roomProfile(students, selectedRoom, HOMEROOMS), [students, selectedRoom]);
 
   const sidePanelData = useMemo(() => {
     if (!sidePanel) return null;
@@ -272,6 +350,8 @@ export default function App() {
 
         <div className="main">
           <div className="ml">
+            {page !== "campus" && !campusFlowComplete && <div className="under-construction">{t.underConstructionBanner}</div>}
+
             {page === "campus" && (
               <>
                 <div className="card">
@@ -302,32 +382,33 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {["lafthi", "kammi", "esl"].map((subject, index) => {
-                          const dist = campusDemand.totals[subject as "lafthi" | "kammi" | "esl"];
-                          const subjectDef = SUBJECTS[subject as SubjectKey];
+                        {LEVELED_SUBJECTS.map((subject, index) => {
+                          const dist = campusDemand.totals[subject];
+                          const subjectDef = SUBJECTS[subject];
                           return (
                             <tr key={subject} style={{ background: index % 2 ? "#FAFAF7" : "#fff" }}>
-                              <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontSize: 12, fontWeight: 900, color: subjectDef.color, whiteSpace: "nowrap" }}>{subjectLabel(subject as SubjectKey)}</td>
+                              <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontSize: 12, fontWeight: 900, color: subjectDef.color, whiteSpace: "nowrap" }}>{subjectLabel(subject)}</td>
                               <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L1}</td>
                               <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L2}</td>
                               <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, fontWeight: 800 }}>{dist.L3}</td>
                               <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8" }}>
                                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                                   {LEVELS.map((level) => {
-                                    const open = levelOpen[subject as "kammi" | "lafthi" | "esl"][level] !== false;
+                                    const open = levelOpen[subject][level] !== false;
                                     return (
                                       <button
                                         key={level}
                                         type="button"
-                                        onClick={() =>
+                                        onClick={() => {
                                           setLevelOpen((prev) => ({
                                             ...prev,
                                             [subject]: {
-                                              ...prev[subject as "kammi" | "lafthi" | "esl"],
+                                              ...prev[subject],
                                               [level]: !open,
                                             },
-                                          }))
-                                        }
+                                          }));
+                                          setLevelDecisions((prev) => ({ ...prev, [subject]: true }));
+                                        }}
                                         style={{
                                           border: `1px solid ${open ? "#1a1a1a" : "#E8E4DD"}`,
                                           background: open ? "#1a1a1a" : "#fff",
@@ -353,119 +434,156 @@ export default function App() {
                     </table>
                   </div>
 
+                  <div className={cx("step-status", step0Complete && "ok")}>
+                    {step0Complete
+                      ? t.step0Ready
+                      : `${t.step0NeedsDecision} ${step0DecidedCount}/${LEVELED_SUBJECTS.length} · ${t.step0NeedsTwoLevels} ${step0MinLevelCount}/${LEVELED_SUBJECTS.length}`}
+                  </div>
                   <div style={{ marginTop: 10, fontSize: 11, color: "#6B665F" }}>{t.prototypePolicyG12}</div>
                 </div>
 
-                <div className="card">
-                  <div className="card-t">
-                    {t.step1}
-                    <span className="meta">{t.step1Hint}</span>
+                {revealedStep >= 1 ? (
+                  <div className="card">
+                    <div className="card-t">
+                      {t.step1}
+                      <span className="meta">{t.step1Hint}</span>
+                    </div>
+
+                    {LEVELED_SUBJECTS.map((subject) => {
+                      const subjectDef = SUBJECTS[subject];
+                      const options = STREAM_GROUPS.filter((group) => group.subject === subject);
+                      const pickedId = selectedStreams[subject];
+
+                      return (
+                        <div key={subject} style={{ marginBottom: 16 }}>
+                          <div style={{ fontSize: 12, fontWeight: 900, color: subjectDef.color, marginBottom: 6 }}>{subjectLabel(subject)}</div>
+
+                          {options.map((group) => {
+                            const picked = pickedId === group.id;
+                            return (
+                              <div
+                                key={group.id}
+                                className={cx("stream-opt", picked && "picked")}
+                                onClick={() =>
+                                  setSelectedStreams((prev) => ({
+                                    ...prev,
+                                    [subject]: group.id,
+                                  }))
+                                }
+                              >
+                                <div className="so-radio">{picked && <div className="so-dot" />}</div>
+                                <div className="so-info">
+                                  <div className="so-slot">{t.bundleMeetings}: {t.slot} {group.slot} · {group.slotLabel}</div>
+                                  <div className="so-pattern">📅 {patternLabel(group.pattern)}</div>
+                                  <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+                                    {LEVELS.map((level) => {
+                                      const course = group.levels.find((entry) => entry?.level === level);
+                                      if (!course) return null;
+                                      const isOpen = levelOpen[subject][level] !== false;
+                                      return (
+                                        <div key={level} className={cx("bundle-row", !isOpen && "closed")}>
+                                          <span
+                                            className={cx("bundle-level", !isOpen && "closed")}
+                                            style={{ background: subjectDef.bg, color: subjectDef.color }}
+                                          >
+                                            {level}
+                                          </span>
+                                          <span className="bundle-teacher">{personLabel(course.teacherName)}</span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+
+                    <div className={cx("step-status", step1Complete && "ok")}>
+                      {step1Complete
+                        ? t.step1Ready
+                        : `${t.step1NeedsBundle} ${selectedStreamCount}/${LEVELED_SUBJECTS.length}`}
+                    </div>
                   </div>
+                ) : (
+                  <div className="card step-lock">
+                    <div className="card-t">{t.step1}</div>
+                    <div className="step-lock-copy">{t.unlockStep1}</div>
+                  </div>
+                )}
 
-                  {(["lafthi", "kammi", "esl"] as const).map((subject) => {
-                    const subjectDef = SUBJECTS[subject];
-                    const options = STREAM_GROUPS.filter((group) => group.subject === subject);
-                    const pickedId = selectedStreams[subject];
+                {revealedStep >= 2 ? (
+                  <div className="card">
+                    <div className="card-t">
+                      {t.step2}
+                      <span className="meta">{t.step2Hint}</span>
+                    </div>
 
-                    return (
-                      <div key={subject} style={{ marginBottom: 16 }}>
-                        <div style={{ fontSize: 12, fontWeight: 900, color: subjectDef.color, marginBottom: 6 }}>{subjectLabel(subject)}</div>
+                    {GRADES.map((grade) => {
+                      const subjects = GRADE_SUBJECTS[grade].all;
+                      return (
+                        <div key={grade} style={{ padding: "10px 0", borderTop: grade === 10 ? "none" : "1px solid #F0EDE8" }}>
+                          <div style={{ fontSize: 12, fontWeight: 900, marginBottom: 8 }}>{t.grade} {grade}</div>
+                          {subjects.map((subject) => {
+                            const subjectDef = SUBJECTS[subject];
+                            const options = courses.filter((course) => course.subject === subject && course.grade === grade);
+                            if (!options.length) return null;
+                            const selected = gradeCourseSelections[grade]?.[subject];
 
-                        {options.map((group) => {
-                          const picked = pickedId === group.id;
-                          return (
-                            <div
-                              key={group.id}
-                              className={cx("stream-opt", picked && "picked")}
-                              onClick={() =>
-                                setSelectedStreams((prev) => ({
-                                  ...prev,
-                                  [subject]: picked ? undefined : group.id,
-                                }))
-                              }
-                            >
-                              <div className="so-radio">{picked && <div className="so-dot" />}</div>
-                              <div className="so-info">
-                                <div className="so-slot">{t.bundleMeetings}: {t.slot} {group.slot} · {group.slotLabel}</div>
-                                <div className="so-pattern">📅 {patternLabel(group.pattern)}</div>
-                                <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
-                                  {LEVELS.map((level) => {
-                                    const course = group.levels.find((entry) => entry?.level === level);
-                                    if (!course) return null;
+                            return (
+                              <div key={subject} className="grade-course-row">
+                                <div className="gcr-name">
+                                  <div className="gcr-dot" style={{ background: subjectDef.color }} />
+                                  {subjectLabel(subject)}
+                                </div>
+                                <div className="gcr-options">
+                                  {options.map((course) => {
+                                    const slotInfo = SLOTS.find((slot) => slot.id === course.meetings[0]?.slot);
+                                    const isOn = selected === course.id;
                                     return (
-                                      <div key={level} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "#6B665F" }}>
-                                        <span style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 900, fontSize: 10, padding: "1px 6px", borderRadius: 4, background: subjectDef.bg, color: subjectDef.color }}>{level}</span>
-                                        <span style={{ flex: 1, fontWeight: 800 }}>{personLabel(course.teacherName)}</span>
-                                      </div>
+                                      <button
+                                        key={course.id}
+                                        className={cx("gcr-opt", isOn && "on")}
+                                        onClick={() =>
+                                          setGradeCourseSelections((prev) => ({
+                                            ...prev,
+                                            [grade]: {
+                                              ...(prev[grade] || {}),
+                                              [subject]: course.id,
+                                            },
+                                          }))
+                                        }
+                                      >
+                                        {t.slot} {course.meetings[0]?.slot} · {slotInfo?.start} · {patternLabel(course.pattern)} · {personLabel(course.teacherName)}
+                                      </button>
                                     );
                                   })}
                                 </div>
                               </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
-                </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
 
-                <div className="card">
-                  <div className="card-t">
-                    {t.step2}
-                    <span className="meta">{t.step2Hint}</span>
+                    <div className={cx("step-status", step2Complete && "ok")}>
+                      {step2Complete
+                        ? t.step2Ready
+                        : `${t.step2NeedsSelections} ${selectedGradeOfferings}/${requiredGradeOfferings.length}`}
+                    </div>
                   </div>
-
-                  {GRADES.map((grade) => {
-                    const subjects = GRADE_SUBJECTS[grade].all;
-                    return (
-                      <div key={grade} style={{ padding: "10px 0", borderTop: grade === 10 ? "none" : "1px solid #F0EDE8" }}>
-                        <div style={{ fontSize: 12, fontWeight: 900, marginBottom: 8 }}>{t.grade} {grade}</div>
-                        {subjects.map((subject) => {
-                          const subjectDef = SUBJECTS[subject];
-                          const options = courses.filter((course) => course.subject === subject && course.grade === grade);
-                          if (!options.length) return null;
-                          const selected = gradeCourseSelections[grade]?.[subject];
-
-                          return (
-                            <div key={subject} className="grade-course-row">
-                              <div className="gcr-name">
-                                <div className="gcr-dot" style={{ background: subjectDef.color }} />
-                                {subjectLabel(subject)}
-                              </div>
-                              <div className="gcr-options">
-                                {options.map((course) => {
-                                  const slotInfo = SLOTS.find((slot) => slot.id === course.meetings[0]?.slot);
-                                  const isOn = selected === course.id;
-                                  return (
-                                    <button
-                                      key={course.id}
-                                      className={cx("gcr-opt", isOn && "on")}
-                                      onClick={() =>
-                                        setGradeCourseSelections((prev) => ({
-                                          ...prev,
-                                          [grade]: {
-                                            ...(prev[grade] || {}),
-                                            [subject]: isOn ? undefined : course.id,
-                                          },
-                                        }))
-                                      }
-                                    >
-                                      {t.slot} {course.meetings[0]?.slot} · {slotInfo?.start} · {patternLabel(course.pattern)} · {personLabel(course.teacherName)}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
-                </div>
+                ) : (
+                  <div className="card step-lock">
+                    <div className="card-t">{t.step2}</div>
+                    <div className="step-lock-copy">{t.unlockStep2}</div>
+                  </div>
+                )}
 
                 <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8, gap: 10, alignItems: "center" }}>
-                  <span style={{ fontSize: 11, color: "#94908A" }}>{t.applyHint}</span>
-                  <button className="apply-btn" onClick={applyCampusPlan} disabled={computedWhitelist.size === 0}>
+                  <span style={{ fontSize: 11, color: "#94908A" }}>{campusFlowComplete ? t.applyHint : t.finishCampusFlowHint}</span>
+                  <button className="apply-btn" onClick={applyCampusPlan} disabled={!campusFlowComplete || computedWhitelist.size === 0}>
                     {t.apply}
                   </button>
                 </div>

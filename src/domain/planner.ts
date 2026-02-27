@@ -1,10 +1,11 @@
-import { DAYS, HOMEROOMS, LEVELS, SLOTS, SUBJECTS } from "./constants";
+import { DAYS, LEVELS, SLOTS, SUBJECTS } from "./constants";
 import { getSubjectLabelFromT } from "./i18n";
 import { blockKeyForCourse, courseMatchesStudent } from "./rules";
 import type {
   Assignments,
   Course,
   Day,
+  Homeroom,
   Level,
   MoveResolutions,
   MovementResult,
@@ -78,7 +79,8 @@ export function seedAssignmentsFromCampusPlan(
   gradeCourseSelections: GradeCourseSelections,
   students: Student[],
   courses: Course[],
-  streamGroups: StreamGroup[]
+  streamGroups: StreamGroup[],
+  homerooms: Homeroom[]
 ) {
   const next: Assignments = {};
 
@@ -97,11 +99,11 @@ export function seedAssignmentsFromCampusPlan(
       levelToCourseId[course.level] = course.id;
     }
 
-    const roomLevelCounts = HOMEROOMS.filter((room) => room.grade !== 12).map((room) => {
+    const roomLevelCounts = homerooms.filter((room) => room.grade !== 12).map((room) => {
       const roomStudents = students.filter((student) => student.homeroom === room.id);
       const dist: Record<Level, number> = { L1: 0, L2: 0, L3: 0 };
       for (const student of roomStudents) {
-        if ((subject === "kammi" || subject === "lafthi") && student.doneQ) continue;
+        if (student.done[subject]) continue;
         dist[student.needs[subject]] += 1;
       }
       return { roomId: room.id, dist };
@@ -126,7 +128,7 @@ export function seedAssignmentsFromCampusPlan(
       usedRooms.add(bestRoom.roomId);
     }
 
-    for (const room of HOMEROOMS) {
+    for (const room of homerooms) {
       if (room.grade === 12) continue;
 
       const roomLevel = roomLevelCounts.find((entry) => entry.roomId === room.id);
@@ -157,7 +159,7 @@ export function seedAssignmentsFromCampusPlan(
 
   for (const [gradeRaw, map] of Object.entries(gradeCourseSelections)) {
     const grade = Number(gradeRaw);
-    const rooms = HOMEROOMS.filter((room) => room.grade === grade);
+    const rooms = homerooms.filter((room) => room.grade === grade);
     for (const courseId of Object.values(map || {})) {
       if (!courseId || !whitelist.has(courseId)) continue;
       const course = getCourse(courseId);
@@ -185,14 +187,15 @@ export function getAvailableCourses(
   day: Day,
   slot: number,
   roomId: number,
-  subjectFilter: SubjectKey | "all"
+  subjectFilter: SubjectKey | "all",
+  homerooms: Homeroom[]
 ) {
   return courses.filter((course) => {
     if (!whitelist || !whitelist.has(course.id)) return false;
     if (!course.meetings.some((meeting) => meeting.day === day && meeting.slot === slot)) return false;
     if (subjectFilter !== "all" && course.subject !== subjectFilter) return false;
 
-    const roomGrade = HOMEROOMS.find((room) => room.id === roomId)?.grade;
+    const roomGrade = homerooms.find((room) => room.id === roomId)?.grade;
     if ((course.subject === "ministry" || course.subject === "future" || SUBJECTS[course.subject].tahsili) && course.grade !== roomGrade) {
       return false;
     }
@@ -226,7 +229,8 @@ export function computeMovement(
   students: Student[],
   moveResolutions: MoveResolutions,
   whitelist: Set<string> | null,
-  t: Translations
+  t: Translations,
+  homerooms: Homeroom[]
 ): MovementResult {
   const assignment = getAssignment(assignments, roomId, day, slotId);
   const empty: MovementResult = { aligned: [], mustMoveOut: [], forcedStay: [], moveIns: [], blockKey: "", effectiveHere: 0 };
@@ -248,7 +252,7 @@ export function computeMovement(
 
   const optionsFor = (student: Student) => {
     const options: Array<{ roomId: number; courseId: string }> = [];
-    for (const room of HOMEROOMS) {
+    for (const room of homerooms) {
       if (room.id === roomId) continue;
       const otherCourseId = getAssignment(assignments, room.id, day, slotId);
       if (!otherCourseId) continue;
@@ -274,17 +278,20 @@ export function computeMovement(
       continue;
     }
 
-    if (subject.qudrat && student.doneQ) {
-      const options = optionsFor(student).filter((option) => SUBJECTS[courses.find((entry) => entry.id === option.courseId)!.subject].tahsili);
+    if (subject.leveled && student.done[course.subject as "kammi" | "lafthi" | "esl"]) {
+      let options = optionsFor(student);
+      if (subject.qudrat && student.doneQ) {
+        options = options.filter((option) => SUBJECTS[courses.find((entry) => entry.id === option.courseId)!.subject].tahsili);
+      }
       if (options.length > 0) {
         mustMoveOut.push({
           ...student,
-          neededLabel: `${t.tahsiliLabel} ${t.grade} ${student.grade}`,
+          neededLabel: subject.qudrat && student.doneQ ? `${t.tahsiliLabel} ${t.grade} ${student.grade}` : `${subjectLabel} ${t.done}`,
           options,
           resolved: moveResolutions?.[student.id]?.[blockKey],
         });
       } else {
-        forcedStay.push({ ...student, reason: t.reasonDoneQudrat });
+        forcedStay.push({ ...student, reason: subject.qudrat && student.doneQ ? t.reasonDoneQudrat : `${subjectLabel} ${t.done}` });
       }
       continue;
     }
@@ -332,17 +339,18 @@ export function unresolvedMoves(
   students: Student[],
   moveResolutions: MoveResolutions,
   whitelist: Set<string> | null,
-  t: Translations
+  t: Translations,
+  homerooms: Homeroom[]
 ) {
   const byKey = new Map<string, MustMoveStudent & { day: Day; slotId: number; fromRoom: number; blockKey: string }>();
 
-  for (const room of HOMEROOMS) {
+  for (const room of homerooms) {
     for (const day of DAYS) {
       for (const slot of SLOTS) {
         const assignment = getAssignment(assignments, room.id, day, slot.id);
         if (!assignment) continue;
 
-        const movement = computeMovement(room.id, day, slot.id, assignments, courses, students, moveResolutions, whitelist, t);
+        const movement = computeMovement(room.id, day, slot.id, assignments, courses, students, moveResolutions, whitelist, t, homerooms);
         if (!movement.blockKey) continue;
 
         for (const move of movement.mustMoveOut) {
@@ -365,11 +373,11 @@ export function unresolvedMoves(
   return Array.from(byKey.values());
 }
 
-export function scheduleStats(assignments: Assignments, unresolvedCount: number) {
+export function scheduleStats(assignments: Assignments, unresolvedCount: number, homerooms: Homeroom[]) {
   let total = 0;
   let filled = 0;
 
-  for (const room of HOMEROOMS) {
+  for (const room of homerooms) {
     for (const day of DAYS) {
       for (const slot of SLOTS) {
         total += 1;
@@ -401,7 +409,7 @@ export function demandSnapshot(students: Student[]) {
     else stillQ += 1;
 
     for (const subject of ["lafthi", "kammi", "esl"] as const) {
-      if ((subject === "lafthi" || subject === "kammi") && student.doneQ) continue;
+      if (student.done[subject]) continue;
       totals[subject][student.needs[subject]] += 1;
     }
   }
@@ -409,9 +417,9 @@ export function demandSnapshot(students: Student[]) {
   return { totals, doneQ, stillQ };
 }
 
-export function roomProfile(students: Student[], selectedRoom: number) {
+export function roomProfile(students: Student[], selectedRoom: number, homerooms: Homeroom[]) {
   const roomStudents = students.filter((student) => student.homeroom === selectedRoom);
-  const grade = HOMEROOMS[selectedRoom].grade;
+  const grade = homerooms.find((room) => room.id === selectedRoom)?.grade || 10;
   const ld = {
     kammi: { L1: 0, L2: 0, L3: 0 },
     lafthi: { L1: 0, L2: 0, L3: 0 },
@@ -426,7 +434,7 @@ export function roomProfile(students: Student[], selectedRoom: number) {
     else if (student.grade === 12) qNotDone += 1;
 
     for (const subject of ["kammi", "lafthi", "esl"] as const) {
-      if ((subject === "kammi" || subject === "lafthi") && student.doneQ) continue;
+      if (student.done[subject]) continue;
       ld[subject][student.needs[subject]] += 1;
     }
   }

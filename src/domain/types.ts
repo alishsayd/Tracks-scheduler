@@ -37,12 +37,19 @@ export interface StudentNeeds {
   esl: Level;
 }
 
+export interface StudentDoneState {
+  kammi: boolean;
+  lafthi: boolean;
+  esl: boolean;
+}
+
 export interface Student {
   id: string;
   name: string;
   homeroom: number;
   grade: number;
   doneQ: boolean;
+  done: StudentDoneState;
   needs: StudentNeeds;
   strength: number;
 }

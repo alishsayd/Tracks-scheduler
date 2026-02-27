@@ -1,5 +1,6 @@
-import { DAYS, GRADES, HOMEROOMS, LEVELS, SLOTS } from "./constants";
-import type { Course, Day, Level, StreamGroup, Student, SubjectKey } from "./types";
+import { DAYS, GRADES, LEVELS, SLOTS } from "./constants";
+import { buildRoomStudentTargets, type AdminConfig } from "./adminConfig";
+import type { Course, Day, Homeroom, Level, LeveledSubject, StreamGroup, Student, SubjectKey } from "./types";
 
 const TEACHERS = [
   "Abdullah Al-Qahtani",
@@ -35,7 +36,26 @@ function seededRandom(seed: number) {
   };
 }
 
-export function genStudents() {
+function pickWeighted<T>(rand: () => number, values: T[], weights: number[]) {
+  const total = weights.reduce((sum, value) => sum + value, 0);
+  let rolling = rand() * total;
+  for (let i = 0; i < values.length; i++) {
+    rolling -= weights[i];
+    if (rolling <= 0) return values[i];
+  }
+  return values[values.length - 1];
+}
+
+function pickSubjectOutcome(rand: () => number, dist: AdminConfig["subjectDistributions"][LeveledSubject][10]) {
+  const bucket = pickWeighted(rand, ["L1", "L2", "L3", "done"] as const, [dist.L1, dist.L2, dist.L3, dist.done]);
+  if (bucket === "done") {
+    const level = pickWeighted(rand, LEVELS, [dist.L1, dist.L2, dist.L3]);
+    return { level, done: true };
+  }
+  return { level: bucket, done: false };
+}
+
+export function genStudents(homerooms: Homeroom[], config: AdminConfig) {
   const r = seededRandom(42);
   const first = [
     "Abdullah",
@@ -61,40 +81,36 @@ export function genStudents() {
   ];
   const last = ["Al-Qahtani", "Al-Dosari", "Al-Shehri", "Al-Ghamdi", "Al-Harbi", "Al-Otaibi", "Al-Zahrani", "Al-Malki"];
 
-  const pick = (levels: Level[], weights: number[]) => {
-    const total = weights.reduce((sum, value) => sum + value, 0);
-    let rolling = r() * total;
-    for (let i = 0; i < levels.length; i++) {
-      rolling -= weights[i];
-      if (rolling <= 0) return levels[i];
-    }
-    return levels[levels.length - 1];
-  };
-
-  const levelWeights = {
-    kammi: { 10: [50, 40, 10], 11: [25, 45, 30], 12: [10, 35, 55] },
-    lafthi: { 10: [50, 45, 5], 11: [20, 50, 30], 12: [5, 40, 55] },
-    esl: { 10: [55, 40, 5], 11: [30, 50, 20], 12: [15, 45, 40] },
-  } as const;
-
   const students: Student[] = [];
+  const roomTargets = buildRoomStudentTargets(config, homerooms);
   let sid = 1;
 
-  for (const hr of HOMEROOMS) {
-    for (let i = 0; i < hr.capacity; i++) {
+  for (const hr of homerooms) {
+    const grade = hr.grade as 10 | 11 | 12;
+    const roomCount = roomTargets[hr.id] || 0;
+
+    for (let i = 0; i < roomCount; i++) {
       const name = `${first[(hr.id * 13 + i) % first.length]} ${last[(hr.id * 7 + i) % last.length]}`;
-      const grade = hr.grade;
-      const doneQ = grade === 12 ? r() < 0.65 : false;
+      const kammiOutcome = pickSubjectOutcome(r, config.subjectDistributions.kammi[grade]);
+      const lafthiOutcome = pickSubjectOutcome(r, config.subjectDistributions.lafthi[grade]);
+      const eslOutcome = pickSubjectOutcome(r, config.subjectDistributions.esl[grade]);
+      const done = {
+        kammi: grade === 10 ? false : kammiOutcome.done,
+        lafthi: grade === 10 ? false : lafthiOutcome.done,
+        esl: grade === 10 ? false : eslOutcome.done,
+      };
+
       students.push({
         id: `s${sid++}`,
         name,
         homeroom: hr.id,
         grade,
-        doneQ,
+        doneQ: done.kammi && done.lafthi,
+        done,
         needs: {
-          kammi: pick(LEVELS, levelWeights.kammi[grade]),
-          lafthi: pick(LEVELS, levelWeights.lafthi[grade]),
-          esl: pick(LEVELS, levelWeights.esl[grade]),
+          kammi: kammiOutcome.level,
+          lafthi: lafthiOutcome.level,
+          esl: eslOutcome.level,
         },
         strength: r(),
       });

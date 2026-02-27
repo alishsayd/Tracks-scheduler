@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildHomerooms, getDefaultAdminConfig } from "./adminConfig";
 import { buildStreamGroups, genCourses, genStudents } from "./data";
 import { courseMatchesStudent } from "./rules";
 import { buildCampusWhitelist, demandSnapshot, seedAssignmentsFromCampusPlan, unresolvedMoves } from "./planner";
@@ -6,7 +7,9 @@ import { getT } from "./i18n";
 import type { Student } from "./types";
 import type { LevelOpenState, SelectedStreams } from "./planner";
 
-const students = genStudents();
+const adminConfig = getDefaultAdminConfig();
+const homerooms = buildHomerooms(adminConfig);
+const students = genStudents(homerooms, adminConfig);
 const courses = genCourses();
 const streamGroups = buildStreamGroups(courses);
 
@@ -25,10 +28,11 @@ describe("stream planner domain", () => {
       homeroom: 4,
       grade: 12,
       doneQ: false,
+      done: { kammi: false, lafthi: false, esl: false },
       needs: { kammi: "L2", lafthi: "L2", esl: "L1" },
       strength: 0.5,
     } as const;
-    const g12Done = { ...g12NotDone, doneQ: true };
+    const g12Done = { ...g12NotDone, doneQ: true, done: { kammi: true, lafthi: true, esl: false } };
 
     const tahsili = courses.find((course) => course.subject === "t_math" && course.grade === 12);
     expect(tahsili).toBeTruthy();
@@ -51,9 +55,9 @@ describe("stream planner domain", () => {
 
     const gradeCourseSelections = {};
     const whitelist = buildCampusWhitelist(selectedStreams, gradeCourseSelections, levelOpen, streamGroups);
-    const assignments = seedAssignmentsFromCampusPlan(whitelist, selectedStreams, levelOpen, gradeCourseSelections, students, courses, streamGroups);
+    const assignments = seedAssignmentsFromCampusPlan(whitelist, selectedStreams, levelOpen, gradeCourseSelections, students, courses, streamGroups, homerooms);
 
-    const unresolved = unresolvedMoves(assignments, courses, students, {}, whitelist, getT("en"));
+    const unresolved = unresolvedMoves(assignments, courses, students, {}, whitelist, getT("en"), homerooms);
     const keys = new Set(unresolved.map((row) => `${row.id}|${row.blockKey}`));
 
     expect(unresolved.length).toBe(keys.size);

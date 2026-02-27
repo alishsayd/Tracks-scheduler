@@ -9,6 +9,9 @@ Homeroom-first stream planner prototype rebuilt as a maintainable React + TypeSc
    - `npm install`
 3. Start dev server
    - `npm run dev`
+4. Open pages
+   - Scheduler: `http://localhost:5173/`
+   - Admin: `http://localhost:5173/admin/`
 
 ## Test
 
@@ -27,6 +30,12 @@ GitHub Actions workflow at `.github/workflows/deploy.yml`:
 - deploys `dist/` to GitHub Pages
 
 The Vite `base` is derived from `GITHUB_REPOSITORY`, so it works on project pages.
+
+## Admin dataset controls
+
+- Admin page is published at `/admin/` (project pages: `https://alishsayd.github.io/Tracks-scheduler/admin/`).
+- Settings persist to browser `localStorage`.
+- Click `Apply` in admin, then refresh the scheduler page to load the new dataset.
 
 ## Project structure
 

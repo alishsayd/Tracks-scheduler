@@ -31,12 +31,15 @@ export function courseMatchesStudent(course: Course, student: Student) {
   }
 
   if (subject?.qudrat) {
-    if (student.doneQ) return false;
-    return student.needs[course.subject] === course.level;
+    const key = course.subject as "kammi" | "lafthi";
+    if (student.done[key]) return false;
+    return student.needs[key] === course.level;
   }
 
   if (subject?.leveled) {
-    return student.needs[course.subject] === course.level;
+    const key = course.subject as "kammi" | "lafthi" | "esl";
+    if (student.done[key]) return false;
+    return student.needs[key] === course.level;
   }
 
   return true;
