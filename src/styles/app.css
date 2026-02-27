@@ -526,6 +526,12 @@ body {
   flex: 1;
 }
 
+.gcr-option-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .gcr-opt {
   font-size: 10px;
   font-weight: 600;
@@ -556,6 +562,24 @@ body {
 
 .gcr-opt:disabled:hover {
   border-color: #DFDAD2;
+}
+
+.gcr-info {
+  width: 18px;
+  height: 18px;
+  border: 1px solid #D5D0C7;
+  border-radius: 50%;
+  background: #fff;
+  color: #7A746C;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.gcr-info:hover {
+  border-color: #BEB8AD;
+  color: #5E5851;
 }
 
 .apply-btn {

@@ -880,12 +880,12 @@ export default function AppV6() {
                                     <td key={level} className="step0-level-cell" style={{ verticalAlign: "top", paddingBottom: 12 }}>
                                       <div className="step0-level-count">{baseCount} students</div>
                                       <label className="step0-run-check">
-                                        <span>Run</span>
+                                        <span>Activate</span>
                                         <input
                                           type="checkbox"
                                           checked={run}
                                           onChange={() => toggleRunLevel(subject, level)}
-                                          aria-label={`Run ${subject} ${level}`}
+                                          aria-label={`Activate ${subject} ${level}`}
                                         />
                                       </label>
 
@@ -1045,10 +1045,7 @@ export default function AppV6() {
                                   <tr>
                                     <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", background: "#F5F3EE" }}>Room</th>
                                     <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", background: "#F5F3EE" }}>Host</th>
-                                    <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", background: "#F5F3EE" }}>Stay</th>
-                                    <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", background: "#F5F3EE" }}>In</th>
-                                    <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", background: "#F5F3EE" }}>Out</th>
-                                    <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", background: "#F5F3EE" }}>Projected</th>
+                                    <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", background: "#F5F3EE" }}>Projected roster</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -1074,11 +1071,8 @@ export default function AppV6() {
                                           </select>
                                         )}
                                       </td>
-                                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11 }}>{row.stay}</td>
-                                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11 }}>{row.inCount}</td>
-                                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11 }}>{row.outCount}</td>
                                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", fontFamily: "'JetBrains Mono',monospace", fontSize: 11 }}>
-                                        {row.effectiveCount}/{row.capacity}
+                                        {row.effectiveCount} students
                                       </td>
                                     </tr>
                                   ))}
@@ -1091,7 +1085,7 @@ export default function AppV6() {
                             <div className="step-inline-note" style={{ marginTop: 8 }}>
                               {preview.summary.stay} stay · {preview.summary.move} move · {preview.summary.forcedStays} forced stays
                               {preview.summary.worstRoom
-                                ? ` · worst room ${preview.summary.worstRoom.effective}/${preview.summary.worstRoom.capacity}`
+                                ? ` · max roster ${preview.summary.worstRoom.effective} students`
                                 : ""}
                             </div>
                           ) : (
@@ -1152,32 +1146,77 @@ export default function AppV6() {
                                     const isOn = selected === course.id;
                                     const optionMeetingKeys = new Set(toMeetingKeys(course.meetings));
                                     const blockedByLeveled = [...optionMeetingKeys].some((key) => leveledBlockedByGrade[grade]?.has(key));
+                                    let conflictingGradeWide: ReturnType<typeof getCourse> | null = null;
+                                    let conflictingGradeWideMeeting: { day: Day; slot: number } | null = null;
                                     const blockedBySelectedGradeWide = Object.entries(gradeCourseSelections[grade] || {}).some(([otherSubject, otherCourseId]) => {
                                       if (!otherCourseId) return false;
                                       if (otherSubject === subject) return false;
                                       const otherCourse = getCourse(otherCourseId);
                                       if (!otherCourse) return false;
-                                      return otherCourse.meetings.some((meeting) => optionMeetingKeys.has(meetingKey(meeting.day, meeting.slot)));
+                                      const meeting = otherCourse.meetings.find((entry) => optionMeetingKeys.has(meetingKey(entry.day, entry.slot)));
+                                      if (!meeting) return false;
+                                      conflictingGradeWide = otherCourse;
+                                      conflictingGradeWideMeeting = meeting;
+                                      return true;
                                     });
                                     const blocked = !isOn && (blockedByLeveled || blockedBySelectedGradeWide);
+                                    let conflictNote = "";
+                                    if (blockedByLeveled) {
+                                      const firstBlockedMeeting = course.meetings.find((meeting) => leveledBlockedByGrade[grade]?.has(meetingKey(meeting.day, meeting.slot)));
+                                      let blockingLeveledLabel = "leveled course";
+                                      if (firstBlockedMeeting) {
+                                        const leveledConflict = LEVELED_SUBJECTS.find((leveledSubject) => {
+                                          const streamId = selectedStreams[leveledSubject];
+                                          const preview = subjectPreviews[leveledSubject];
+                                          if (!streamId || !preview) return false;
+                                          const group = STREAM_GROUPS.find((entry) => entry.id === streamId);
+                                          if (!group?.courses[0]?.meetings.some((meeting) => meeting.day === firstBlockedMeeting.day && meeting.slot === firstBlockedMeeting.slot)) return false;
+                                          return HOMEROOMS.some((room) => room.grade === grade && Boolean(preview.hostByRoom[room.id]));
+                                        });
+                                        if (leveledConflict) blockingLeveledLabel = subjectLabel(leveledConflict);
+                                      }
+                                      if (firstBlockedMeeting) {
+                                        conflictNote = `Blocked by ${blockingLeveledLabel} on ${dayLabel(firstBlockedMeeting.day)} · ${t.slot} ${firstBlockedMeeting.slot}.`;
+                                      } else {
+                                        conflictNote = `Blocked by ${blockingLeveledLabel}.`;
+                                      }
+                                    }
+                                    if (!conflictNote && blockedBySelectedGradeWide && conflictingGradeWide && conflictingGradeWideMeeting) {
+                                      conflictNote = `Blocked by ${courseLabel(conflictingGradeWide, lang)} on ${dayLabel(conflictingGradeWideMeeting.day)} · ${t.slot} ${conflictingGradeWideMeeting.slot}.`;
+                                    }
+                                    if (!conflictNote && blocked) {
+                                      conflictNote = "Blocked due to a slot conflict.";
+                                    }
                                     return (
-                                      <button
-                                        key={course.id}
-                                        className={cx("gcr-opt", isOn && "on")}
-                                        disabled={blocked}
-                                        onClick={() => {
-                                          if (blocked) return;
-                                          setGradeCourseSelections((prev) => ({
-                                            ...prev,
-                                            [grade]: {
-                                              ...(prev[grade] || {}),
-                                              [subject]: course.id,
-                                            },
-                                          }));
-                                        }}
-                                      >
-                                        {t.slot} {course.meetings[0]?.slot} · {course.startTime} · {patternLabel(course.pattern)} · {personLabel(course.teacherName)}
-                                      </button>
+                                      <div key={course.id} className="gcr-option-wrap">
+                                        <button
+                                          className={cx("gcr-opt", isOn && "on")}
+                                          disabled={blocked}
+                                          onClick={() => {
+                                            if (blocked) return;
+                                            setGradeCourseSelections((prev) => ({
+                                              ...prev,
+                                              [grade]: {
+                                                ...(prev[grade] || {}),
+                                                [subject]: course.id,
+                                              },
+                                            }));
+                                          }}
+                                        >
+                                          {t.slot} {course.meetings[0]?.slot} · {course.startTime} · {patternLabel(course.pattern)} · {personLabel(course.teacherName)}
+                                        </button>
+                                        {blocked && (
+                                          <button
+                                            type="button"
+                                            className="gcr-info"
+                                            aria-label="Why this option is disabled"
+                                            title={conflictNote}
+                                            onClick={() => window.alert(conflictNote)}
+                                          >
+                                            i
+                                          </button>
+                                        )}
+                                      </div>
                                     );
                                   })}
                                 </div>
