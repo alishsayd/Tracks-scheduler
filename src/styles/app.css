@@ -1055,32 +1055,6 @@ body {
   color: #B0ABA3;
 }
 
-.ci-x {
-  position: absolute;
-  top: 2px;
-  inset-inline-end: 2px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(0, 0, 0, .06);
-  color: rgba(0, 0, 0, .3);
-  font-size: 10px;
-  cursor: pointer;
-  display: none;
-  align-items: center;
-  justify-content: center;
-}
-
-.cell:hover .ci-x {
-  display: flex;
-}
-
-.ci-x:hover {
-  background: rgba(220, 38, 38, .12);
-  color: #DC2626;
-}
-
 .badges {
   display: flex;
   gap: 2px;

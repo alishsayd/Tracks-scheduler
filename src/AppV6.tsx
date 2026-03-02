@@ -542,20 +542,6 @@ export default function AppV6() {
     [getCourse]
   );
 
-  const clearSlot = useCallback(
-    (roomId: number, day: Day, slotId: number) => {
-      const currentId = getAssignment(assignments, roomId, day, slotId);
-      if (!currentId) return;
-
-      const currentCourse = getCourse(currentId);
-      if (!currentCourse) return;
-
-      setAssignments((prev) => clearCourseMeetingsForRoom(prev, roomId, currentCourse));
-      if (sidePanel?.day === day && sidePanel?.slotId === slotId) setSidePanel(null);
-    },
-    [assignments, getCourse, sidePanel]
-  );
-
   const getAvailable = useCallback(
     (day: Day, slotId: number, roomId: number) =>
       getAvailableCourses(courses, campusWhitelist, assignments, day, slotId, roomId, subjectFilter, HOMEROOMS),
@@ -1271,15 +1257,6 @@ export default function AppV6() {
 
                             {course && (
                               <div className="ci" style={{ background: subject?.bg, color: subject?.accent }}>
-                                <button
-                                  className="ci-x"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    clearSlot(selectedRoom, day, slot.id);
-                                  }}
-                                >
-                                  ×
-                                </button>
                                 <div className="ci-s">{course ? subjectLabel(course.subject) : ""}</div>
                                 <div className="ci-l">{[course.level, course.grade ? `${t.grade} ${course.grade}` : ""].filter(Boolean).join(" · ")}</div>
                                 <div className="ci-t">{personLabel(course.teacherName)}</div>
