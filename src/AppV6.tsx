@@ -35,6 +35,9 @@ import type {
   LeveledSubject,
 } from "./domain/types";
 import {
+  buildLeveledBlockersByGrade,
+  canSatisfyRequiredGradeWideSubjects,
+  isMeetingBlockedByLeveled,
   LEVELED_SUBJECTS,
   type ConflictFlag,
   type PreFlightIssue,
@@ -114,6 +117,15 @@ export default function AppV6() {
   const [step2Collapsed, setStep2Collapsed] = useState(false);
 
   const getCourse = useCallback((courseId: string) => courses.find((course) => course.id === courseId), [courses]);
+  const streamGroupById = useMemo(() => new Map(STREAM_GROUPS.map((group) => [group.id, group])), []);
+  const streamGroupsBySubject = useMemo(
+    () => ({
+      kammi: STREAM_GROUPS.filter((group) => group.subject === "kammi"),
+      lafthi: STREAM_GROUPS.filter((group) => group.subject === "lafthi"),
+      esl: STREAM_GROUPS.filter((group) => group.subject === "esl"),
+    }),
+    []
+  );
 
   const baseDemandBySubject = useMemo(() => buildBaseDemandBySubject(students), [students]);
 
@@ -183,6 +195,79 @@ export default function AppV6() {
     return previews;
   }, [selectedStreams, routingPlans, students, hostOverrides]);
 
+  const step1EnabledStreamIds = useMemo(() => {
+    const enabled: Record<LeveledSubject, Set<string>> = {
+      kammi: new Set<string>(),
+      lafthi: new Set<string>(),
+      esl: new Set<string>(),
+    };
+    const feasibilityCache = new Map<string, boolean>();
+
+    const selectionKey = (selection: SelectedStreams) =>
+      LEVELED_SUBJECTS.map((subject) => `${subject}:${selection[subject] || "-"}`).join("|");
+
+    const buildPreviewsForSelection = (selection: SelectedStreams) => {
+      const previews: Partial<Record<LeveledSubject, ReturnType<typeof buildRoomMapPreview>>> = {};
+
+      for (const subject of LEVELED_SUBJECTS) {
+        const streamId = selection[subject];
+        if (!streamId) return null;
+        const group = streamGroupById.get(streamId);
+        if (!group || group.subject !== subject) return null;
+        previews[subject] = buildRoomMapPreview(subject, group, routingPlans[subject], students, HOMEROOMS, hostOverrides[subject]);
+      }
+
+      return previews;
+    };
+
+    const isStep2FeasibleForSelection = (selection: SelectedStreams) => {
+      const previews = buildPreviewsForSelection(selection);
+      if (!previews) return false;
+      const blockers = buildLeveledBlockersByGrade(selection, previews, STREAM_GROUPS, HOMEROOMS);
+      return canSatisfyRequiredGradeWideSubjects(courses, blockers);
+    };
+
+    const canCompleteWithSelection = (selection: SelectedStreams): boolean => {
+      const key = selectionKey(selection);
+      const cached = feasibilityCache.get(key);
+      if (cached !== undefined) return cached;
+
+      const missingSubjects = LEVELED_SUBJECTS.filter((subject) => !selection[subject]).sort(
+        (left, right) => streamGroupsBySubject[left].length - streamGroupsBySubject[right].length
+      );
+
+      let feasible = false;
+      if (missingSubjects.length === 0) {
+        feasible = isStep2FeasibleForSelection(selection);
+      } else {
+        const nextSubject = missingSubjects[0];
+        feasible = streamGroupsBySubject[nextSubject].some((group) =>
+          canCompleteWithSelection({
+            ...selection,
+            [nextSubject]: group.id,
+          })
+        );
+      }
+
+      feasibilityCache.set(key, feasible);
+      return feasible;
+    };
+
+    for (const subject of LEVELED_SUBJECTS) {
+      for (const group of streamGroupsBySubject[subject]) {
+        const candidate: SelectedStreams = {
+          ...selectedStreams,
+          [subject]: group.id,
+        };
+        if (canCompleteWithSelection(candidate)) {
+          enabled[subject].add(group.id);
+        }
+      }
+    }
+
+    return enabled;
+  }, [selectedStreams, streamGroupById, streamGroupsBySubject, routingPlans, students, hostOverrides, courses]);
+
   const selectedStreamCount = useMemo(() => LEVELED_SUBJECTS.filter((subject) => Boolean(selectedStreams[subject])).length, [selectedStreams]);
 
   const step1Issues = useMemo(
@@ -190,7 +275,17 @@ export default function AppV6() {
     [selectedStreams, subjectPreviews, t, fmt]
   );
 
-  const step1Complete = useMemo(() => LEVELED_SUBJECTS.every((subject) => step1Issues[subject].length === 0), [step1Issues]);
+  const step1SelectionFeasible = useMemo(() => {
+    return LEVELED_SUBJECTS.every((subject) => {
+      const streamId = selectedStreams[subject];
+      if (!streamId) return false;
+      return step1EnabledStreamIds[subject].has(streamId);
+    });
+  }, [selectedStreams, step1EnabledStreamIds]);
+
+  const step1Complete = useMemo(() => {
+    return LEVELED_SUBJECTS.every((subject) => step1Issues[subject].length === 0) && step1SelectionFeasible;
+  }, [step1Issues, step1SelectionFeasible]);
 
   const requiredGradeOfferings = useMemo(() => {
     const required: Array<{ grade: number; subject: SubjectKey }> = [];
@@ -203,45 +298,14 @@ export default function AppV6() {
     return required;
   }, [courses]);
 
-  const leveledBlockersByGrade = useMemo(() => {
-    const blocked: Record<number, Map<string, Set<LeveledSubject>>> = {};
-    for (const grade of GRADES) blocked[grade] = new Map<string, Set<LeveledSubject>>();
-
-    for (const subject of LEVELED_SUBJECTS) {
-      const streamId = selectedStreams[subject];
-      const preview = subjectPreviews[subject];
-      if (!streamId || !preview) continue;
-
-      const group = STREAM_GROUPS.find((entry) => entry.id === streamId);
-      const meetings = group?.courses[0]?.meetings || [];
-      if (!meetings.length) continue;
-
-      for (const room of HOMEROOMS) {
-        const host = preview.hostByRoom[room.id];
-        if (!host) continue;
-        for (const meeting of meetings) {
-          const key = meetingKey(meeting.day, meeting.slot);
-          const gradeBlockers = blocked[room.grade];
-          if (!gradeBlockers.has(key)) gradeBlockers.set(key, new Set<LeveledSubject>());
-          gradeBlockers.get(key)!.add(subject);
-        }
-      }
-    }
-
-    return blocked;
-  }, [selectedStreams, subjectPreviews]);
+  const leveledBlockersByGrade = useMemo(
+    () => buildLeveledBlockersByGrade(selectedStreams, subjectPreviews, STREAM_GROUPS, HOMEROOMS),
+    [selectedStreams, subjectPreviews]
+  );
 
   const meetingBlockedByLeveled = useCallback(
-    (grade: number, course: Course, meeting: { day: Day; slot: number }) => {
-      const blockerSubjects = leveledBlockersByGrade[grade]?.get(meetingKey(meeting.day, meeting.slot));
-      if (!blockerSubjects || blockerSubjects.size === 0) return false;
-
-      if (grade === 12 && course.audienceTag === "Qudrat_Done") {
-        return [...blockerSubjects].some((subject) => SUBJECTS[subject].qudrat !== true);
-      }
-
-      return true;
-    },
+    (grade: number, course: Course, meeting: { day: Day; slot: number }) =>
+      isMeetingBlockedByLeveled(leveledBlockersByGrade, grade, course, meeting),
     [leveledBlockersByGrade]
   );
 
@@ -866,11 +930,16 @@ export default function AppV6() {
 
                               {options.map((group) => {
                                 const picked = pickedId === group.id;
+                                const enabled = step1EnabledStreamIds[subject].has(group.id);
                                 return (
                                   <div
                                     key={group.id}
-                                    className={cx("stream-opt", picked && "picked")}
-                                    onClick={() => pickStream(subject, group.id)}
+                                    className={cx("stream-opt", picked && "picked", !enabled && "disabled")}
+                                    onClick={() => {
+                                      if (!enabled) return;
+                                      pickStream(subject, group.id);
+                                    }}
+                                    aria-disabled={!enabled}
                                   >
                                     <div className="so-radio">{picked && <div className="so-dot" />}</div>
                                     <div className="so-info">

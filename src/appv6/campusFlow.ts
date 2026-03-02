@@ -1,7 +1,7 @@
-import { GRADE_SUBJECTS, GRADES, LEVELS } from "../domain/constants";
+import { GRADE_SUBJECTS, GRADES, LEVELS, SUBJECTS } from "../domain/constants";
 import type { RoomMapPreview, SubjectRoutingPlan } from "../domain/plannerV6";
 import { createDefaultSubjectRoutingPlan } from "../domain/plannerV6";
-import type { Course, Day, LeveledSubject, Level, Student, SubjectKey, Translations } from "../domain/types";
+import type { Course, Day, LeveledSubject, Level, StreamGroup, Student, SubjectKey, Translations } from "../domain/types";
 import type { GradeCourseSelections, SelectedStreams } from "../domain/planner";
 
 export const LEVELED_SUBJECTS = ["lafthi", "kammi", "esl"] as const;
@@ -50,6 +50,8 @@ export interface Step2SubjectOptionState {
   fixedCourseId: string | null;
   unavailable: boolean;
 }
+
+export type LeveledBlockersByGrade = Record<number, Map<string, Set<LeveledSubject>>>;
 
 export function meetingKey(day: Day, slot: number) {
   return `${day}|${slot}`;
@@ -363,4 +365,98 @@ export function buildStep2OptionsBySubject(
   }
 
   return optionState;
+}
+
+export function buildLeveledBlockersByGrade(
+  selectedStreams: SelectedStreams,
+  subjectPreviews: Partial<Record<LeveledSubject, RoomMapPreview>>,
+  streamGroups: StreamGroup[],
+  homerooms: Array<{ id: number; grade: number }>
+): LeveledBlockersByGrade {
+  const blocked: LeveledBlockersByGrade = {};
+  for (const grade of GRADES) blocked[grade] = new Map<string, Set<LeveledSubject>>();
+
+  for (const subject of LEVELED_SUBJECTS) {
+    const streamId = selectedStreams[subject];
+    const preview = subjectPreviews[subject];
+    if (!streamId || !preview) continue;
+
+    const group = streamGroups.find((entry) => entry.id === streamId);
+    const meetings = group?.courses[0]?.meetings || [];
+    if (!meetings.length) continue;
+
+    for (const room of homerooms) {
+      const host = preview.hostByRoom[room.id];
+      if (!host) continue;
+      for (const meeting of meetings) {
+        const key = meetingKey(meeting.day, meeting.slot);
+        const gradeBlockers = blocked[room.grade];
+        if (!gradeBlockers.has(key)) gradeBlockers.set(key, new Set<LeveledSubject>());
+        gradeBlockers.get(key)!.add(subject);
+      }
+    }
+  }
+
+  return blocked;
+}
+
+export function isMeetingBlockedByLeveled(
+  blockedByGrade: LeveledBlockersByGrade,
+  grade: number,
+  course: Course,
+  meeting: { day: Day; slot: number }
+) {
+  const blockerSubjects = blockedByGrade[grade]?.get(meetingKey(meeting.day, meeting.slot));
+  if (!blockerSubjects || blockerSubjects.size === 0) return false;
+
+  if (grade === 12 && course.audienceTag === "Qudrat_Done") {
+    return [...blockerSubjects].some((subject) => SUBJECTS[subject].qudrat !== true);
+  }
+
+  return true;
+}
+
+export function canSatisfyRequiredGradeWideSubjects(courses: Course[], blockedByGrade: LeveledBlockersByGrade) {
+  for (const grade of GRADES) {
+    const requiredSubjects = (GRADE_SUBJECTS[grade].all as SubjectKey[]).filter((subject) =>
+      courses.some((course) => course.grade === grade && course.subject === subject)
+    );
+
+    const validBySubject = new Map<SubjectKey, Course[]>();
+
+    for (const subject of requiredSubjects) {
+      const valid = courses.filter((course) => {
+        if (course.grade !== grade || course.subject !== subject) return false;
+        return !course.meetings.some((meeting) => isMeetingBlockedByLeveled(blockedByGrade, grade, course, meeting));
+      });
+
+      if (valid.length === 0) return false;
+      validBySubject.set(subject, valid);
+    }
+
+    const orderedSubjects = requiredSubjects.slice().sort((a, b) => {
+      return (validBySubject.get(a)?.length || 0) - (validBySubject.get(b)?.length || 0);
+    });
+    const occupied = new Set<string>();
+
+    const dfs = (index: number): boolean => {
+      if (index >= orderedSubjects.length) return true;
+      const subject = orderedSubjects[index];
+      const options = validBySubject.get(subject) || [];
+
+      for (const option of options) {
+        const keys = toMeetingKeys(option.meetings);
+        if (keys.some((key) => occupied.has(key))) continue;
+        keys.forEach((key) => occupied.add(key));
+        if (dfs(index + 1)) return true;
+        keys.forEach((key) => occupied.delete(key));
+      }
+
+      return false;
+    };
+
+    if (!dfs(0)) return false;
+  }
+
+  return true;
 }

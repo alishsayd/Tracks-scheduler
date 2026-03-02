@@ -558,6 +558,22 @@ body {
   background: #ecfdf5;
 }
 
+.stream-opt.disabled {
+  background: #F3F2EF;
+  border-color: #DFDAD2;
+  color: #B1ABA1;
+  cursor: not-allowed;
+}
+
+.stream-opt.disabled:hover {
+  border-color: #DFDAD2;
+  background: #F3F2EF;
+}
+
+.stream-opt.disabled .so-radio {
+  border-color: #D6D1C8;
+}
+
 .step2-stream-opt {
   margin-bottom: 0;
 }
