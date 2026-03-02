@@ -698,7 +698,11 @@ export default function AppV6() {
 
             unmetByNeed.forEach((count, key) => {
               const [qSubject, qLevel] = key.split("|");
-              const line = `${count} students need ${subjectLabel(qSubject as SubjectKey)} ${qLevel} on ${dayLabel(day)} · ${t.slot} ${slot.id}, but no matching section is running.`;
+              const line = fmt("roomFlagQudratLevelClosed", {
+                count,
+                subject: subjectLabel(qSubject as SubjectKey),
+                level: qLevel,
+              });
               if (!seen.has(line)) {
                 seen.add(line);
                 flags.push(line);
@@ -706,7 +710,7 @@ export default function AppV6() {
             });
 
             if (unmetGeneric > 0) {
-              const line = `${unmetGeneric} students need Qudrat on ${dayLabel(day)} · ${t.slot} ${slot.id}, but no matching section is running.`;
+              const line = fmt("roomFlagQudratNoCompatible", { count: unmetGeneric });
               if (!seen.has(line)) {
                 seen.add(line);
                 flags.push(line);
