@@ -5,7 +5,7 @@ This document explains how the current prototype makes planning and assignment d
 ## Scope
 
 - Applies to the current React + TypeScript prototype in this repo (`AppV6` flow).
-- Focuses on campus setup (Step 0-2), auto-assignment defaults, and reconciliation behavior.
+- Focuses on campus setup (Step 0-2), auto-assignment defaults, and homeroom movement behavior.
 - Describes current behavior, not ideal future-state behavior.
 
 ## End-to-End Workflow Logic
@@ -45,15 +45,10 @@ For each leveled subject with a selected stream bundle:
 The preview then places students to rooms:
 
 - Keep student in home room if host matches target level.
-- Otherwise choose destination room by priority:
-  1. Same-grade rooms with available seats.
-  2. Cross-grade rooms with seats (only after same-grade seats are exhausted).
-  3. If no seats exist, still choose by score (soft-capacity behavior).
-- Within the chosen pool, prefer:
-  1. Rooms already receiving move-ins (clustering),
-  2. More remaining seats,
-  3. Lower current count,
-  4. Lower room id tie-breaker.
+- Otherwise choose destination room using two signals:
+  1. Prefer same-grade when roster load is comparable.
+  2. Keep receiving-room rosters balanced by choosing the lower current load.
+- Tie-breaker uses lower room id.
 
 If no valid destination exists, student stays in home room as forced stay.
 
@@ -73,10 +68,10 @@ On `Apply`:
 1. A campus whitelist is built from selected stream courses and selected grade-wide courses.
 2. Room assignments are generated from Step 1 previews + Step 2 selections.
 3. Qudrat/Tahsili coupling is applied for Grade 12 via auto Tahsili fill on Qudrat slots.
-4. Grade-wide writes can overwrite existing cells; collisions are captured as conflict flags.
+4. Grade-wide writes can overwrite seeded cells for the same room/day/slot.
 5. Must-move students are auto-resolved into destination rooms before opening homeroom view.
 
-## Reconciliation Logic
+## Homeroom Movement Logic
 
 For each room + timetable block, movement is computed as:
 
@@ -89,9 +84,12 @@ Must-move auto-resolution is block-based and deterministic:
 
 - Moves are deduplicated by `student + blockKey`.
 - Destination scoring uses the same two biases:
-  - Grade cohesion first,
-  - Clustering before scattering.
+  - Prefer same-grade when possible,
+  - Keep destination-room rosters balanced.
 - Capacity is a soft signal, not a hard blocker.
+
+Manual edits happen in Homeroom side panel via `Change` on each student row.
+There is no separate reconciliation tab in the current prototype.
 
 ## Key Assumptions in This Prototype
 
@@ -122,4 +120,3 @@ Must-move auto-resolution is block-based and deterministic:
 - Movement classification and auto-resolve: `src/domain/plannerMovement.ts`
 - Matching rules (student vs course): `src/domain/rules.ts`
 - Shared domain constants/types: `src/domain/constants.ts`, `src/domain/types.ts`
-

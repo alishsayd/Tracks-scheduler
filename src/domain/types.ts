@@ -113,12 +113,6 @@ export interface MoveModalState {
   blockKey: string;
 }
 
-export interface PickerState {
-  day: Day;
-  slotId: number;
-  mode: "add" | "replace";
-}
-
 export interface SidePanelState {
   day: Day;
   slotId: number;

@@ -2,14 +2,12 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { DAYS, GRADE_SUBJECTS, GRADES, LEVELS, SLOTS, SUBJECTS } from "./domain/constants";
 import { buildHomerooms, getRuntimeAdminConfig } from "./domain/adminConfig";
 import { buildStreamGroups, genCourses, genStudents } from "./domain/data";
-import { formatDayPattern, getDayLabel, getSubjectLabelFromT, getT, localizePersonName, localizeRoomName, localizeSegment } from "./domain/i18n";
+import { formatDayPattern, getDayLabel, getSubjectLabelFromT, getT, localizePersonName, localizeRoomName } from "./domain/i18n";
 import {
   autoResolveMustMoves,
   buildCampusWhitelist,
-  clearCourseMeetingsForRoom,
   computeMovement,
   getAssignment,
-  getAvailableCourses,
   scheduleStats,
   type GradeCourseSelections,
   type SelectedStreams,
@@ -27,7 +25,6 @@ import type {
   Lang,
   MoveModalState,
   MoveResolutions,
-  PickerState,
   SidePanelState,
   SubjectKey,
   TabPage,
@@ -73,7 +70,6 @@ export default function AppV6() {
   const patternLabel = useCallback((pattern: string) => formatDayPattern(lang, pattern), [lang]);
   const roomLabel = useCallback((roomName: string) => localizeRoomName(lang, roomName), [lang]);
   const personLabel = useCallback((name: string) => localizePersonName(lang, name), [lang]);
-  const segmentLabel = useCallback((segment: string | null) => localizeSegment(lang, segment), [lang]);
   const fmt = useCallback(
     (key: string, vars: Record<string, string | number>) => {
       let message = t[key] || key;
@@ -94,9 +90,6 @@ export default function AppV6() {
 
   const [page, setPage] = useState<TabPage>("campus");
   const [selectedRoom, setSelectedRoom] = useState(0);
-
-  const [picker, setPicker] = useState<PickerState | null>(null);
-  const [subjectFilter, setSubjectFilter] = useState<SubjectKey | "all">("all");
 
   const [sidePanel, setSidePanel] = useState<SidePanelState | null>(null);
   const [moveModal, setMoveModal] = useState<MoveModalState | null>(null);
@@ -528,36 +521,6 @@ export default function AppV6() {
       },
     }));
   }, [markPlanDirty]);
-
-  const assignCourseToRoom = useCallback(
-    (roomId: number, courseId: string) => {
-      const course = getCourse(courseId);
-      if (!course) return;
-
-      setAssignments((prev) => {
-        const next: Assignments = { ...prev };
-        if (!next[roomId]) next[roomId] = {};
-
-        for (const meeting of course.meetings) {
-          const dayState = { ...(next[roomId]?.[meeting.day] || {}) };
-          dayState[meeting.slot] = course.id;
-          next[roomId] = { ...(next[roomId] || {}), [meeting.day]: dayState };
-        }
-
-        return next;
-      });
-
-      setPicker(null);
-      setSubjectFilter("all");
-    },
-    [getCourse]
-  );
-
-  const getAvailable = useCallback(
-    (day: Day, slotId: number, roomId: number) =>
-      getAvailableCourses(courses, campusWhitelist, assignments, day, slotId, roomId, subjectFilter, HOMEROOMS),
-    [courses, campusWhitelist, assignments, subjectFilter]
-  );
 
   const computeMovementForCell = useCallback(
     (roomId: number, day: Day, slotId: number) =>
@@ -1435,89 +1398,6 @@ export default function AppV6() {
           )}
         </div>
       </div>
-
-      {picker && (
-        <div
-          className="ov"
-          onClick={() => {
-            setPicker(null);
-            setSubjectFilter("all");
-          }}
-        >
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <div className="m-hd">
-              <div>
-                <h3>{t.availableCourses}</h3>
-                <div className="m-hd-s">{dayLabel(picker.day)} · {SLOTS.find((slot) => slot.id === picker.slotId)?.start} · {roomLabel(HOMEROOMS[selectedRoom].name)}</div>
-              </div>
-              <button
-                className="m-x"
-                onClick={() => {
-                  setPicker(null);
-                  setSubjectFilter("all");
-                }}
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="pk-fl">
-              <button className={cx("pk-ch", subjectFilter === "all" && "on")} onClick={() => setSubjectFilter("all")}>{t.all}</button>
-              {Object.entries(SUBJECTS).map(([key, subject]) => (
-                <button key={key} className={cx("pk-ch", subjectFilter === key && "on")} onClick={() => setSubjectFilter(key as SubjectKey)}>
-                  {subjectLabel(key as SubjectKey)}
-                </button>
-              ))}
-            </div>
-
-            <div className="pk-bd">
-              {(() => {
-                const available = getAvailable(picker.day, picker.slotId, selectedRoom);
-                if (!available.length) return <div className="pk-empty">{t.noCourses}</div>;
-
-                const grouped: Record<string, typeof available> = {};
-                for (const course of available) {
-                  if (!grouped[course.subject]) grouped[course.subject] = [];
-                  grouped[course.subject].push(course);
-                }
-
-                return Object.entries(grouped).map(([subjectKey, list]) => {
-                  const subject = SUBJECTS[subjectKey as SubjectKey];
-                  return (
-                    <div key={subjectKey}>
-                      <div className="pk-sec">{subjectLabel(subjectKey as SubjectKey)}</div>
-                      {list.map((course) => (
-                        <div
-                          key={course.id}
-                          className="pk-opt"
-                          onClick={() => {
-                            const current = getAssignment(assignments, selectedRoom, picker.day, picker.slotId);
-                            if (current) {
-                              const currentCourse = getCourse(current);
-                              if (currentCourse) {
-                                setAssignments((prev) => clearCourseMeetingsForRoom(prev, selectedRoom, currentCourse));
-                              }
-                            }
-                            assignCourseToRoom(selectedRoom, course.id);
-                          }}
-                        >
-                          <div className="pk-cl" style={{ background: subject.color }} />
-                          <div className="pk-i">
-                            <div className="pk-sn">{courseLabel(course, lang)}</div>
-                            <div className="pk-mt">{personLabel(course.teacherName)}{course.segment ? ` · ${segmentLabel(course.segment)}` : ""}</div>
-                            <div className="pk-pt">📅 {patternLabel(course.pattern)}</div>
-                          </div>
-                          <div className="pk-lv" style={{ background: subject.bg, color: subject.color }}>{course.level || (course.grade ? `${t.grade} ${course.grade}` : t.all)}</div>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                });
-              })()}
-            </div>
-          </div>
-        </div>
-      )}
 
       {moveModal && (
         <div className="ov" onClick={() => setMoveModal(null)}>
