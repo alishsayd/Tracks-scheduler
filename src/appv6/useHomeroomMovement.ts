@@ -29,7 +29,6 @@ type UseHomeroomMovementParams = {
   lang: Lang;
   fmt: (key: string, vars: Record<string, string | number>) => string;
   subjectLabel: (subject: SubjectKey) => string;
-  roomLabel: (roomName: string) => string;
 };
 
 export function useHomeroomMovement({
@@ -45,7 +44,6 @@ export function useHomeroomMovement({
   lang,
   fmt,
   subjectLabel,
-  roomLabel,
 }: UseHomeroomMovementParams) {
   const [sidePanel, setSidePanel] = useState<SidePanelState | null>(null);
   const [moveModal, setMoveModal] = useState<MoveModalState | null>(null);
@@ -127,6 +125,11 @@ export function useHomeroomMovement({
     if (!campusWhitelist) return [];
     const flags: string[] = [];
     const seen = new Set<string>();
+    const pushFlag = (line: string) => {
+      if (seen.has(line)) return;
+      seen.add(line);
+      flags.push(line);
+    };
     const roomCapacity = homerooms[selectedRoom].capacity;
     const roomPrepG12Students = students.filter((student) => student.homeroom === selectedRoom && student.grade === 12 && !student.doneQ);
     const offlineSlots = DAYS.reduce((sum, day) => {
@@ -145,18 +148,12 @@ export function useHomeroomMovement({
         if (movement.forcedStay.length > 0) {
           const reason = movement.forcedStay[0]?.reason ? ` (${movement.forcedStay[0].reason})` : "";
           const line = fmt("roomFlagForcedStay", { count: movement.forcedStay.length, course: courseLabel(course, lang), reason });
-          if (!seen.has(line)) {
-            seen.add(line);
-            flags.push(line);
-          }
+          pushFlag(line);
         }
 
         if (movement.effectiveHere > roomCapacity) {
           const line = fmt("roomFlagRosterOverflow", { course: courseLabel(course, lang), count: movement.effectiveHere });
-          if (!seen.has(line)) {
-            seen.add(line);
-            flags.push(line);
-          }
+          pushFlag(line);
         }
 
         if (SUBJECTS[course.subject].tahsili && roomPrepG12Students.length > 0) {
@@ -198,18 +195,12 @@ export function useHomeroomMovement({
                 subject: subjectLabel(qSubject as SubjectKey),
                 level: qLevel,
               });
-              if (!seen.has(line)) {
-                seen.add(line);
-                flags.push(line);
-              }
+              pushFlag(line);
             });
 
             if (unmetGeneric > 0) {
               const line = fmt("roomFlagQudratNoCompatible", { count: unmetGeneric });
-              if (!seen.has(line)) {
-                seen.add(line);
-                flags.push(line);
-              }
+              pushFlag(line);
             }
           }
         }

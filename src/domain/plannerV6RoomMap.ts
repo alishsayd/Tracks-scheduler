@@ -11,48 +11,12 @@ function cloneCounts(input: Record<Level, number>): Record<Level, number> {
   return { L1: input.L1, L2: input.L2, L3: input.L3 };
 }
 
-function clampInt(value: number, min: number, max: number) {
-  if (!Number.isFinite(value)) return min;
-  return Math.max(min, Math.min(max, Math.round(value)));
-}
-
-function normalizeSingleTarget(source: Level, target: Level): Level {
-  if (target !== source) return target;
-  if (source === "L1") return "L2";
-  if (source === "L3") return "L2";
-  return "L1";
-}
-
 function runningLevels(plan: SubjectRoutingPlan): Level[] {
   return LEVELS.filter((level) => plan.run[level]);
 }
 
-function normalizedPlan(plan: SubjectRoutingPlan): SubjectRoutingPlan {
-  return {
-    run: {
-      L1: Boolean(plan.run.L1),
-      L2: Boolean(plan.run.L2),
-      L3: Boolean(plan.run.L3),
-    },
-    forceMove: {
-      L1: {
-        target: normalizeSingleTarget("L1", plan.forceMove.L1.target),
-        count: clampInt(plan.forceMove.L1.count, 0, Number.MAX_SAFE_INTEGER),
-      },
-      L2: {
-        toL1: clampInt(plan.forceMove.L2.toL1, 0, Number.MAX_SAFE_INTEGER),
-        toL3: clampInt(plan.forceMove.L2.toL3, 0, Number.MAX_SAFE_INTEGER),
-      },
-      L3: {
-        target: normalizeSingleTarget("L3", plan.forceMove.L3.target),
-        count: clampInt(plan.forceMove.L3.count, 0, Number.MAX_SAFE_INTEGER),
-      },
-    },
-  };
-}
-
 function buildRemap(students: Student[], subject: LeveledSubject, planInput: SubjectRoutingPlan) {
-  const plan = normalizedPlan(planInput);
+  const plan = planInput;
 
   const grouped: Record<Level, Student[]> = { L1: [], L2: [], L3: [] };
   for (const student of students) {
@@ -82,8 +46,8 @@ function buildRemap(students: Student[], subject: LeveledSubject, planInput: Sub
     }
 
     if (level === "L2") {
-      const moveToL1 = clampInt(plan.forceMove.L2.toL1, 0, source.length);
-      const moveToL3 = clampInt(plan.forceMove.L2.toL3, 0, source.length - moveToL1);
+      const moveToL1 = Math.max(0, Math.min(plan.forceMove.L2.toL1, source.length));
+      const moveToL3 = Math.max(0, Math.min(plan.forceMove.L2.toL3, source.length - moveToL1));
 
       for (let i = 0; i < source.length; i += 1) {
         const student = source[i];
@@ -103,14 +67,13 @@ function buildRemap(students: Student[], subject: LeveledSubject, planInput: Sub
 
     const target = level === "L1" ? plan.forceMove.L1.target : plan.forceMove.L3.target;
     const count = level === "L1" ? plan.forceMove.L1.count : plan.forceMove.L3.count;
-    const normalizedTarget = normalizeSingleTarget(level, target);
-    const moveCount = clampInt(count, 0, source.length);
+    const moveCount = Math.max(0, Math.min(count, source.length));
 
     for (let i = 0; i < source.length; i += 1) {
       const student = source[i];
       if (i < moveCount) {
-        remappedLevelByStudent.set(student.id, normalizedTarget);
-        effective[normalizedTarget] += 1;
+        remappedLevelByStudent.set(student.id, target);
+        effective[target] += 1;
       } else {
         remappedLevelByStudent.set(student.id, level);
         effective[level] += 1;

@@ -159,46 +159,6 @@ export function computeMovement(
   return { aligned, mustMoveOut, forcedStay, moveIns, blockKey, effectiveHere };
 }
 
-export function unresolvedMoves(
-  assignments: Assignments,
-  courses: Course[],
-  students: Student[],
-  moveResolutions: MoveResolutions,
-  whitelist: Set<string> | null,
-  t: Translations,
-  homerooms: Homeroom[]
-) {
-  const byKey = new Map<string, MustMoveStudent & { day: Day; slotId: number; fromRoom: number; blockKey: string }>();
-
-  for (const room of homerooms) {
-    for (const day of DAYS) {
-      for (const slot of SLOTS) {
-        const assignment = getAssignment(assignments, room.id, day, slot.id);
-        if (!assignment) continue;
-
-        const movement = computeMovement(room.id, day, slot.id, assignments, courses, students, moveResolutions, whitelist, t, homerooms);
-        if (!movement.blockKey) continue;
-
-        for (const move of movement.mustMoveOut) {
-          if (move.resolved !== undefined && move.resolved !== null) continue;
-          const key = `${move.id}|${movement.blockKey}`;
-          if (!byKey.has(key)) {
-            byKey.set(key, {
-              ...move,
-              day,
-              slotId: slot.id,
-              fromRoom: room.id,
-              blockKey: movement.blockKey,
-            });
-          }
-        }
-      }
-    }
-  }
-
-  return Array.from(byKey.values());
-}
-
 export function autoResolveMustMoves(
   assignments: Assignments,
   courses: Course[],
@@ -209,7 +169,33 @@ export function autoResolveMustMoves(
 ) {
   const resolutions: MoveResolutions = {};
   const homeroomById = new Map(homerooms.map((room) => [room.id, room]));
-  const pending = unresolvedMoves(assignments, courses, students, resolutions, whitelist, t, homerooms).sort((a, b) => {
+  const pendingByKey = new Map<string, MustMoveStudent & { day: Day; slotId: number; fromRoom: number; blockKey: string }>();
+
+  for (const room of homerooms) {
+    for (const day of DAYS) {
+      for (const slot of SLOTS) {
+        const assignment = getAssignment(assignments, room.id, day, slot.id);
+        if (!assignment) continue;
+
+        const movement = computeMovement(room.id, day, slot.id, assignments, courses, students, resolutions, whitelist, t, homerooms);
+        if (!movement.blockKey) continue;
+
+        for (const move of movement.mustMoveOut) {
+          const key = `${move.id}|${movement.blockKey}`;
+          if (pendingByKey.has(key)) continue;
+          pendingByKey.set(key, {
+            ...move,
+            day,
+            slotId: slot.id,
+            fromRoom: room.id,
+            blockKey: movement.blockKey,
+          });
+        }
+      }
+    }
+  }
+
+  const pending = Array.from(pendingByKey.values()).sort((a, b) => {
     if (a.blockKey !== b.blockKey) return a.blockKey.localeCompare(b.blockKey);
     if (a.fromRoom !== b.fromRoom) return a.fromRoom - b.fromRoom;
     return a.id.localeCompare(b.id);

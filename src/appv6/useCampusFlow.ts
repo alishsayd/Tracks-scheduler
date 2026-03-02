@@ -72,10 +72,8 @@ export function useCampusFlow({
   });
   const [gradeCourseSelections, setGradeCourseSelections] = useState<GradeCourseSelections>({});
   const [campusWhitelist, setCampusWhitelist] = useState<Set<string> | null>(null);
+  const [planApplied, setPlanApplied] = useState(false);
   const [activeCampusStep, setActiveCampusStep] = useState<0 | 1 | 2>(0);
-  const [step2Collapsed, setStep2Collapsed] = useState(false);
-  const [planRevision, setPlanRevision] = useState(0);
-  const [appliedPlanRevision, setAppliedPlanRevision] = useState(-1);
 
   const streamGroupById = useMemo(() => new Map(streamGroups.map((group) => [group.id, group])), [streamGroups]);
   const streamGroupsBySubject = useMemo(
@@ -160,12 +158,8 @@ export function useCampusFlow({
       lafthi: new Set<string>(),
       esl: new Set<string>(),
     };
-    const feasibilityCache = new Map<string, boolean>();
 
-    const selectionKey = (selection: SelectedStreams) =>
-      LEVELED_SUBJECTS.map((subject) => `${subject}:${selection[subject] || "-"}`).join("|");
-
-    const buildPreviewsForSelection = (selection: SelectedStreams) => {
+    const buildPreviews = (selection: SelectedStreams) => {
       const previews: Partial<Record<LeveledSubject, ReturnType<typeof buildRoomMapPreview>>> = {};
 
       for (const subject of LEVELED_SUBJECTS) {
@@ -179,37 +173,32 @@ export function useCampusFlow({
       return previews;
     };
 
-    const isStep2FeasibleForSelection = (selection: SelectedStreams) => {
-      const previews = buildPreviewsForSelection(selection);
+    const isFeasible = (selection: SelectedStreams) => {
+      const previews = buildPreviews(selection);
       if (!previews) return false;
       const blockers = buildLeveledBlockersByGrade(selection, previews, streamGroups, homerooms);
       return canSatisfyRequiredGradeWideSubjects(courses, blockers);
     };
 
-    const canCompleteWithSelection = (selection: SelectedStreams): boolean => {
-      const key = selectionKey(selection);
-      const cached = feasibilityCache.get(key);
-      if (cached !== undefined) return cached;
+    const canComplete = (candidate: SelectedStreams): boolean => {
+      const missing = LEVELED_SUBJECTS.filter((subject) => !candidate[subject]);
+      if (missing.length === 0) return isFeasible(candidate);
 
-      const missingSubjects = LEVELED_SUBJECTS.filter((subject) => !selection[subject]).sort(
-        (left, right) => streamGroupsBySubject[left].length - streamGroupsBySubject[right].length
-      );
-
-      let feasible = false;
-      if (missingSubjects.length === 0) {
-        feasible = isStep2FeasibleForSelection(selection);
-      } else {
-        const nextSubject = missingSubjects[0];
-        feasible = streamGroupsBySubject[nextSubject].some((group) =>
-          canCompleteWithSelection({
-            ...selection,
-            [nextSubject]: group.id,
-          })
-        );
+      if (missing.length === 1) {
+        const [subject] = missing;
+        return streamGroupsBySubject[subject].some((group) => isFeasible({ ...candidate, [subject]: group.id }));
       }
 
-      feasibilityCache.set(key, feasible);
-      return feasible;
+      const [first, second] = missing;
+      return streamGroupsBySubject[first].some((firstGroup) =>
+        streamGroupsBySubject[second].some((secondGroup) =>
+          isFeasible({
+            ...candidate,
+            [first]: firstGroup.id,
+            [second]: secondGroup.id,
+          })
+        )
+      );
     };
 
     for (const subject of LEVELED_SUBJECTS) {
@@ -218,7 +207,7 @@ export function useCampusFlow({
           ...selectedStreams,
           [subject]: group.id,
         };
-        if (canCompleteWithSelection(candidate)) {
+        if (canComplete(candidate)) {
           enabled[subject].add(group.id);
         }
       }
@@ -305,43 +294,33 @@ export function useCampusFlow({
     });
   }, [step2OptionsBySubject]);
 
-  const step2DecisionOfferings = useMemo(
-    () =>
-      requiredGradeOfferings.filter(({ grade, subject }) => {
-        const state = step2OptionsBySubject[grade]?.[subject];
-        return Boolean(state?.decisionRequired);
-      }),
-    [requiredGradeOfferings, step2OptionsBySubject]
-  );
+  const step2Stats = useMemo(() => {
+    let decisionCount = 0;
+    let selectedDecisionCount = 0;
+    let unavailableCount = 0;
 
-  const step2UnavailableOfferings = useMemo(
-    () =>
-      requiredGradeOfferings.filter(({ grade, subject }) => {
-        const state = step2OptionsBySubject[grade]?.[subject];
-        return Boolean(state?.unavailable);
-      }),
-    [requiredGradeOfferings, step2OptionsBySubject]
-  );
+    for (const { grade, subject } of requiredGradeOfferings) {
+      const state = step2OptionsBySubject[grade]?.[subject];
+      if (!state || state.unavailable) {
+        unavailableCount += 1;
+        continue;
+      }
 
-  const selectedDecisionOfferings = useMemo(
-    () =>
-      step2DecisionOfferings.filter(({ grade, subject }) => {
-        const selectedId = gradeCourseSelections[grade]?.[subject];
-        if (!selectedId) return false;
-        const state = step2OptionsBySubject[grade]?.[subject];
-        return Boolean(state?.validOptions.some((option) => option.id === selectedId));
-      }).length,
-    [step2DecisionOfferings, gradeCourseSelections, step2OptionsBySubject]
-  );
+      if (!state.decisionRequired) continue;
+      decisionCount += 1;
 
-  const step2Ready = useMemo(
-    () => step2UnavailableOfferings.length === 0 && selectedDecisionOfferings === step2DecisionOfferings.length,
-    [step2UnavailableOfferings.length, selectedDecisionOfferings, step2DecisionOfferings.length]
-  );
+      const selectedId = gradeCourseSelections[grade]?.[subject];
+      const selectedValid = selectedId && state.validOptions.some((option) => option.id === selectedId);
+      if (selectedValid) selectedDecisionCount += 1;
+    }
 
-  const step2AutoResolved = step2Ready && step2DecisionOfferings.length === 0 && step2UnavailableOfferings.length === 0;
+    return { decisionCount, selectedDecisionCount, unavailableCount };
+  }, [requiredGradeOfferings, step2OptionsBySubject, gradeCourseSelections]);
+
+  const step2Ready = step2Stats.unavailableCount === 0 && step2Stats.selectedDecisionCount === step2Stats.decisionCount;
+  const step2AutoResolved = step2Ready && step2Stats.decisionCount === 0;
   const campusFlowComplete = step0Complete && step1Complete && step2Ready;
-  const homeroomEnabled = campusFlowComplete && campusWhitelist !== null && appliedPlanRevision === planRevision;
+  const homeroomEnabled = campusFlowComplete && campusWhitelist !== null && planApplied;
 
   const hasStep1Progress = useMemo(() => LEVELED_SUBJECTS.some((subject) => Boolean(selectedStreams[subject])), [selectedStreams]);
   const hasStep2Progress = useMemo(
@@ -366,25 +345,13 @@ export function useCampusFlow({
   }, [activeCampusStep, step0IssueCount, step0Complete]);
 
   useEffect(() => {
-    if (activeCampusStep !== 2) {
-      setStep2Collapsed(false);
-      return;
-    }
-    if (step2Ready && !step2AutoResolved) {
-      setStep2Collapsed(true);
-    } else {
-      setStep2Collapsed(false);
-    }
-  }, [activeCampusStep, step2Ready, step2AutoResolved]);
-
-  useEffect(() => {
     if (!homeroomEnabled && page === "homeroom") {
       setPage("campus");
     }
   }, [homeroomEnabled, page, setPage]);
 
   const markPlanDirty = useCallback(() => {
-    setPlanRevision((prev) => prev + 1);
+    setPlanApplied(false);
   }, []);
 
   const resetFromStep0 = useCallback(() => {
@@ -394,7 +361,7 @@ export function useCampusFlow({
     setCampusWhitelist(null);
     setAssignments({});
     setMoveResolutions({});
-    setStep2Collapsed(false);
+    setPlanApplied(false);
   }, []);
 
   const resetFromStep1 = useCallback(() => {
@@ -402,7 +369,7 @@ export function useCampusFlow({
     setCampusWhitelist(null);
     setAssignments({});
     setMoveResolutions({});
-    setStep2Collapsed(false);
+    setPlanApplied(false);
   }, []);
 
   const jumpBackToStep = useCallback(
@@ -449,8 +416,7 @@ export function useCampusFlow({
     const autoResolvedMoves = autoResolveMustMoves(nextAssignments, courses, students, whitelist, t, homerooms);
     setMoveResolutions(autoResolvedMoves);
     setAssignments(nextAssignments);
-    setAppliedPlanRevision(planRevision);
-    setStep2Collapsed(true);
+    setPlanApplied(true);
     setPage("homeroom");
   }, [
     step2Ready,
@@ -463,7 +429,6 @@ export function useCampusFlow({
     streamGroups,
     students,
     t,
-    planRevision,
     setPage,
   ]);
 
@@ -526,9 +491,7 @@ export function useCampusFlow({
     gradeCourseSelections,
     campusWhitelist,
     activeCampusStep,
-    step2Collapsed,
     setActiveCampusStep,
-    setStep2Collapsed,
     step0Issues,
     step0IssueCount,
     step0ResolvedIssueCount,
@@ -542,9 +505,9 @@ export function useCampusFlow({
     step1Issues,
     step1Complete,
     step2OptionsBySubject,
-    step2DecisionOfferings,
-    step2UnavailableOfferings,
-    selectedDecisionOfferings,
+    step2DecisionCount: step2Stats.decisionCount,
+    step2SelectedDecisionCount: step2Stats.selectedDecisionCount,
+    step2UnavailableCount: step2Stats.unavailableCount,
     step2Ready,
     step2AutoResolved,
     campusFlowComplete,
@@ -557,4 +520,3 @@ export function useCampusFlow({
     selectGradeCourse,
   };
 }
-

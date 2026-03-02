@@ -3,7 +3,7 @@ import { DAYS, GRADE_SUBJECTS, GRADES, LEVELS, SLOTS, SUBJECTS } from "./domain/
 import { buildHomerooms, getRuntimeAdminConfig } from "./domain/adminConfig";
 import { buildStreamGroups, genCourses, genStudents } from "./domain/data";
 import { formatDayPattern, getDayLabel, getSubjectLabelFromT, getT, localizePersonName, localizeRoomName } from "./domain/i18n";
-import { getAssignment, scheduleStats } from "./domain/planner";
+import { effectiveRoomCountForBlock, getAssignment, scheduleStats } from "./domain/planner";
 import type { RoomHost } from "./domain/plannerV6";
 import { courseLabel } from "./domain/rules";
 import type {
@@ -63,9 +63,7 @@ export default function AppV6() {
     gradeCourseSelections,
     campusWhitelist,
     activeCampusStep,
-    step2Collapsed,
     setActiveCampusStep,
-    setStep2Collapsed,
     step0Issues,
     step0IssueCount,
     step0ResolvedIssueCount,
@@ -79,9 +77,9 @@ export default function AppV6() {
     step1Issues,
     step1Complete,
     step2OptionsBySubject,
-    step2DecisionOfferings,
-    step2UnavailableOfferings,
-    selectedDecisionOfferings,
+    step2DecisionCount,
+    step2SelectedDecisionCount,
+    step2UnavailableCount,
     step2Ready,
     step2AutoResolved,
     campusFlowComplete,
@@ -136,10 +134,21 @@ export default function AppV6() {
     lang,
     fmt,
     subjectLabel,
-    roomLabel,
   });
 
   const stats = useMemo(() => scheduleStats(assignments, HOMEROOMS), [assignments]);
+  const renderQuickChangeButton = useCallback(
+    (studentId: string) => (
+      <button
+        className="sr-btn"
+        disabled={manualOverrideOptions.length === 0}
+        onClick={() => openManualMoveModal(studentId)}
+      >
+        {t.moveAction}
+      </button>
+    ),
+    [manualOverrideOptions.length, openManualMoveModal, t.moveAction]
+  );
 
   return (
     <div dir={dir}>
@@ -219,8 +228,8 @@ export default function AppV6() {
                             key={step}
                             className={cx(
                               "step-node",
-                              activeCampusStep === step && !((step === 2) && step2Collapsed) && "on",
-                              (activeCampusStep > step || (step === 2 && step2Collapsed)) && "done"
+                              activeCampusStep === step && "on",
+                              activeCampusStep > step && "done"
                             )}
                           />
                         ))}
@@ -479,7 +488,7 @@ export default function AppV6() {
                       </div>
                     )}
 
-                    {activeCampusStep === 2 && !step2Collapsed && (
+                    {activeCampusStep === 2 && (
                       <div className="card step-focus">
                         <div className="card-t">{t.step2}</div>
                         <div className="step-inline-note" style={{ marginBottom: 10 }}>
@@ -553,9 +562,9 @@ export default function AppV6() {
                         <div className="step-inline-note">
                           {step2Ready
                             ? t.readyToApply
-                            : step2UnavailableOfferings.length > 0
-                              ? fmt("step2NoValidBundlesLine", { count: step2UnavailableOfferings.length })
-                              : fmt("step2DecisionSelectionsCompleted", { selected: selectedDecisionOfferings, total: step2DecisionOfferings.length })}
+                            : step2UnavailableCount > 0
+                              ? fmt("step2NoValidBundlesLine", { count: step2UnavailableCount })
+                              : fmt("step2DecisionSelectionsCompleted", { selected: step2SelectedDecisionCount, total: step2DecisionCount })}
                         </div>
                         <div className="step-actions">
                           <button className="apply-btn" onClick={applyCampusPlan} disabled={!campusFlowComplete || computedWhitelist.size === 0}>
@@ -563,29 +572,6 @@ export default function AppV6() {
                           </button>
                         </div>
                       </div>
-                    )}
-
-                    {activeCampusStep === 2 && step2Collapsed && (
-                      <>
-                        <div className="step-mini done">
-                          <div>
-                            <div className="step-mini-title">{t.step2CompleteTitle}</div>
-                            <div className="step-mini-copy">{t.step2CompleteCopy}</div>
-                          </div>
-                          <button className="step-mini-btn" onClick={() => setStep2Collapsed(false)}>
-                            {t.editStep2}
-                          </button>
-                        </div>
-                        <div className="card step-focus">
-                          <div className="card-t">{t.cycleReadyTitle}</div>
-                          <div className="step-inline-note">{t.cycleReadyCopy}</div>
-                          <div className="step-actions">
-                            <button className="apply-btn" onClick={applyCampusPlan} disabled={!campusFlowComplete || computedWhitelist.size === 0}>
-                              {t.apply}
-                            </button>
-                          </div>
-                        </div>
-                      </>
                     )}
                   </div>
                   <div className="cycle-card upcoming">
@@ -623,13 +609,6 @@ export default function AppV6() {
                     );
                   })}
                 </div>
-
-                {!campusWhitelist ? (
-                  <div className="card">
-                    <div className="card-t">{t.openCoursesFirstTitle}</div>
-                    <div style={{ fontSize: 12, color: "#94908A" }}>{t.openCoursesFirstBody}</div>
-                  </div>
-                ) : null}
 
                 <div className="room-flags">
                   <div className="room-flags-title">{t.roomFlagsTitle}</div>
@@ -726,13 +705,7 @@ export default function AppV6() {
                     <div key={student.id} className="sr">
                       <span className="sr-n">{personLabel(student.name)}</span>
                       <span className="sr-g">{t.grade} {student.grade}</span>
-                      <button
-                        className="sr-btn"
-                        disabled={manualOverrideOptions.length === 0}
-                        onClick={() => openManualMoveModal(student.id)}
-                      >
-                        {t.moveAction}
-                      </button>
+                      {renderQuickChangeButton(student.id)}
                     </div>
                   ))}
                 </div>
@@ -786,13 +759,7 @@ export default function AppV6() {
                         <span className="sr-n">{personLabel(student.name)}</span>
                         <span className="sr-g">{t.grade} {student.grade}</span>
                         <span className="sr-r">{student.reason}</span>
-                        <button
-                          className="sr-btn"
-                          disabled={manualOverrideOptions.length === 0}
-                          onClick={() => openManualMoveModal(student.id)}
-                        >
-                          {t.moveAction}
-                        </button>
+                        {renderQuickChangeButton(student.id)}
                       </div>
                     ))
                   )}
@@ -808,13 +775,7 @@ export default function AppV6() {
                         <span className="sr-n">{personLabel(student.name)}</span>
                         <span className="sr-g">{t.grade} {student.grade}</span>
                         <span className="sr-r">{t.from} {roomLabel(HOMEROOMS[student.homeroom]?.name || "")}</span>
-                        <button
-                          className="sr-btn"
-                          disabled={manualOverrideOptions.length === 0}
-                          onClick={() => openManualMoveModal(student.id)}
-                        >
-                          {t.moveAction}
-                        </button>
+                        {renderQuickChangeButton(student.id)}
                       </div>
                     ))
                   )}
@@ -842,16 +803,7 @@ export default function AppV6() {
                 const course = getCourse(option.courseId);
                 const subject = course ? SUBJECTS[course.subject] : null;
                 const blockKey = moveModal.blockKey;
-                const base = students.filter((student) => student.homeroom === option.roomId).length;
-                let out = 0;
-                let incoming = 0;
-                for (const student of students) {
-                  const destination = moveResolutions?.[student.id]?.[blockKey];
-                  if (destination === undefined || destination === null) continue;
-                  if (student.homeroom === option.roomId && destination !== option.roomId) out += 1;
-                  if (student.homeroom !== option.roomId && destination === option.roomId) incoming += 1;
-                }
-                const current = base - out + incoming;
+                const current = effectiveRoomCountForBlock(students, moveResolutions, blockKey, option.roomId);
                 const after = current + 1;
 
                 return (
