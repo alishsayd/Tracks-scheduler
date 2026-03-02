@@ -119,6 +119,7 @@ export default function AppV6() {
     manualOverrideOptions,
     roomFlags,
     openManualMoveModal,
+    openMustMoveModal,
     computeMovementForCell,
     getCourse,
   } = useHomeroomMovement({
@@ -732,15 +733,7 @@ export default function AppV6() {
                         </span>
                         <button
                           className="sr-btn"
-                          onClick={() =>
-                            setMoveModal({
-                              studentId: student.id,
-                              day: sidePanel.day,
-                              slotId: sidePanel.slotId,
-                              options: student.options,
-                              blockKey: sidePanelData.blockKey,
-                            })
-                          }
+                          onClick={() => openMustMoveModal(student.id, student.options)}
                         >
                           {t.moveAction}
                         </button>
@@ -814,7 +807,9 @@ export default function AppV6() {
                       <div className="pk-mt">{courseLabel(course, lang)} · {personLabel(course?.teacherName || "")}</div>
                       <div className="pk-pt">{t.capacity}: {current}/{room?.capacity} → {after}/{room?.capacity}</div>
                     </div>
-                    <div className="pk-lv" style={{ background: "#F0EDE8", color: "#6B665F" }}>{t.assign}</div>
+                    <div className="pk-lv" style={{ background: "#F0EDE8", color: "#6B665F" }}>
+                      {option.roomId === selectedRoom ? t.forceStayOption : t.assign}
+                    </div>
                   </div>
                 );
               })}

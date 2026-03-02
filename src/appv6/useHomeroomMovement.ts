@@ -224,6 +224,25 @@ export function useHomeroomMovement({
     [sidePanel, sidePanelData, manualOverrideOptions]
   );
 
+  const openMustMoveModal = useCallback(
+    (studentId: string, options: Array<{ roomId: number; courseId: string }>) => {
+      if (!sidePanel || !sidePanelData) return;
+      const currentCourseId = getAssignment(assignments, selectedRoom, sidePanel.day, sidePanel.slotId);
+      const withStayOption = currentCourseId
+        ? [{ roomId: selectedRoom, courseId: currentCourseId }, ...options.filter((option) => option.roomId !== selectedRoom)]
+        : options;
+
+      setMoveModal({
+        studentId,
+        day: sidePanel.day,
+        slotId: sidePanel.slotId,
+        options: withStayOption,
+        blockKey: sidePanelData.blockKey,
+      });
+    },
+    [sidePanel, sidePanelData, assignments, selectedRoom]
+  );
+
   return {
     sidePanel,
     setSidePanel,
@@ -234,6 +253,7 @@ export function useHomeroomMovement({
     manualOverrideOptions,
     roomFlags,
     openManualMoveModal,
+    openMustMoveModal,
     computeMovementForCell,
     getCourse,
   };
