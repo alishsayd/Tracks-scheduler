@@ -9,7 +9,7 @@ Primary UI entrypoint:
 
 Planning flow modules:
 - `src/appv6/useCampusFlow.ts`  
-  Owns Step 0/1/2 state, gating, plan dirty/applied revisions, and apply pipeline.
+  Owns Step 0/1/2 state, gating, apply pipeline, and homeroom unlock state.
 - `src/appv6/campusFlow.ts`  
   Step policy helpers (demand snapshot, level policy, feasibility checks, step option builders).
 - `src/appv6/applyCampusPlan.ts`  
@@ -41,9 +41,9 @@ Homeroom lock behavior:
 - Homeroom is enabled only when:
   - campus flow is complete (`step0 && step1 && step2`), and
   - a plan has been applied, and
-  - no edits were made after the last apply (`appliedPlanRevision === planRevision`).
-- Any edit to Step 0/1/2 increments `planRevision`.
-- Re-applying updates `appliedPlanRevision`.
+  - `planApplied === true`.
+- Any edit to Step 0/1/2 marks plan stale (`planApplied = false`).
+- Re-applying marks plan fresh (`planApplied = true`).
 - If user is on Homeroom and plan becomes stale, app redirects to Campus.
 
 ## 3. Apply Pipeline
@@ -95,7 +95,7 @@ If you need to change behavior, start here:
 - Auto-route strategy:
   - `plannerMovement.ts` + `plannerPolicy.ts`
 - Homeroom lock semantics:
-  - `useCampusFlow.ts` (`planRevision`, `appliedPlanRevision`, `homeroomEnabled`)
+  - `useCampusFlow.ts` (`planApplied`, `markPlanDirty`, `homeroomEnabled`)
 
 ## 8. Recommended Guard Tests
 
@@ -108,4 +108,3 @@ Add tests when changing:
 - same-grade vs cross-grade ranking decisions,
 - homeroom relock behavior after Step edits,
 - Step 1 feasibility gating.
-
