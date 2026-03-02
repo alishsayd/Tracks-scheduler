@@ -130,6 +130,15 @@ body {
   border-bottom-color: #1a1a1a;
 }
 
+.nt:disabled {
+  color: #C3BFB8;
+  cursor: not-allowed;
+}
+
+.nt:disabled:hover {
+  color: #C3BFB8;
+}
+
 .nbadge {
   display: inline-flex;
   min-width: 16px;

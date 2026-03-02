@@ -423,6 +423,12 @@ export default function AppV6() {
     }
   }, [activeCampusStep, page]);
 
+  useEffect(() => {
+    if (!campusFlowComplete && page === "homeroom") {
+      setPage("campus");
+    }
+  }, [campusFlowComplete, page]);
+
   const resetFromStep0 = useCallback(() => {
     setSelectedStreams({});
     setHostOverrides({ kammi: {}, lafthi: {}, esl: {} });
@@ -768,15 +774,20 @@ export default function AppV6() {
           <button className={cx("nt", page === "campus" && "on")} onClick={() => setPage("campus")}>
             {t.campusPlan}
           </button>
-          <button className={cx("nt", page === "homeroom" && "on")} onClick={() => setPage("homeroom")}>
+          <button
+            className={cx("nt", page === "homeroom" && "on")}
+            disabled={!campusFlowComplete}
+            onClick={() => {
+              if (!campusFlowComplete) return;
+              setPage("homeroom");
+            }}
+          >
             {t.homerooms}
           </button>
         </div>
 
         <div className="main">
           <div className="ml">
-            {page !== "campus" && !campusFlowComplete && <div className="under-construction">{t.underConstructionBanner}</div>}
-
             {page === "campus" && (
               <>
                 <div className="cycle-stack">
