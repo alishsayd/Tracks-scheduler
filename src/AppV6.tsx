@@ -18,7 +18,6 @@ import {
 import {
   autoAssignTahsiliForQudrat,
   buildRoomMapPreview,
-  buildStep0DemandBySubject,
   createDefaultSubjectRoutingPlan,
   levelOpenFromRouting,
   type RoomHost,
@@ -47,6 +46,7 @@ const INIT_STUDENTS = genStudents(HOMEROOMS, ADMIN_CONFIG);
 const INIT_COURSES = genCourses();
 const STREAM_GROUPS = buildStreamGroups(INIT_COURSES);
 const LEVELED_SUBJECTS = ["lafthi", "kammi", "esl"] as const;
+const PLANNING_ROOM_CAPACITY = 22;
 
 function cx(...parts: Array<string | boolean | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -68,25 +68,30 @@ function defaultRoutingPlans(): Record<LeveledSubject, SubjectRoutingPlan> {
   };
 }
 
-function buildInitialRoutingPlans(students: typeof INIT_STUDENTS): Record<LeveledSubject, SubjectRoutingPlan> {
-  const plans = defaultRoutingPlans();
+type Step0Decision = "RUN" | "CLOSE";
 
-  for (const subject of LEVELED_SUBJECTS) {
-    for (const level of LEVELS) {
-      const count = students.filter((student) => !student.done[subject] && student.needs[subject] === level).length;
-      plans[subject].run[level] = count > 10;
-    }
-  }
-
-  return plans;
+interface PreFlightIssue {
+  id: string;
+  subject: LeveledSubject;
+  level: Level;
+  levelDemand: number;
+  totalDemand: number;
+  roomsTotal: number;
+  roomsRemainingIfRun: number;
+  remainingDemandIfRun: number;
+  avgIfRun: number;
+  avgIfClose: number;
+  closeMergeTarget: "L2" | "L1+L3";
+  closeTargetCount: number;
+  closeSplit?: { toL1: number; toL3: number };
+  closeSplitTargetCounts?: { L1: number; L3: number };
 }
 
-function defaultForceMovePanels() {
-  return {
-    kammi: { L1: false, L2: false, L3: false },
-    lafthi: { L1: false, L2: false, L3: false },
-    esl: { L1: false, L2: false, L3: false },
-  };
+interface LevelPolicyEntry {
+  status: Step0Decision;
+  mergeTargetLevel: "L2" | "L1+L3" | null;
+  movedStudentsCount: number;
+  roomCost: 0 | 1;
 }
 
 interface ConflictFlag {
@@ -126,6 +131,7 @@ export default function AppV6() {
     },
     [t]
   );
+  const fmtAvg = useCallback((value: number) => (Number.isFinite(value) ? value.toFixed(1) : "0.0"), []);
 
   const [students] = useState(INIT_STUDENTS);
   const [courses] = useState(INIT_COURSES);
@@ -143,8 +149,7 @@ export default function AppV6() {
   const [moveModal, setMoveModal] = useState<MoveModalState | null>(null);
 
   const [selectedStreams, setSelectedStreams] = useState<SelectedStreams>({});
-  const [routingPlans, setRoutingPlans] = useState<Record<LeveledSubject, SubjectRoutingPlan>>(() => buildInitialRoutingPlans(INIT_STUDENTS));
-  const [forceMovePanels, setForceMovePanels] = useState(defaultForceMovePanels);
+  const [step0Decisions, setStep0Decisions] = useState<Partial<Record<string, Step0Decision>>>({});
   const [hostOverrides, setHostOverrides] = useState<Record<LeveledSubject, Partial<Record<number, RoomHost>>>>({
     kammi: {},
     lafthi: {},
@@ -158,24 +163,225 @@ export default function AppV6() {
 
   const getCourse = useCallback((courseId: string) => courses.find((course) => course.id === courseId), [courses]);
 
+  const baseDemandBySubject = useMemo(() => {
+    const counts: Record<LeveledSubject, Record<Level, number>> = {
+      kammi: { L1: 0, L2: 0, L3: 0 },
+      lafthi: { L1: 0, L2: 0, L3: 0 },
+      esl: { L1: 0, L2: 0, L3: 0 },
+    };
+
+    for (const student of students) {
+      for (const subject of LEVELED_SUBJECTS) {
+        if (student.done[subject]) continue;
+        counts[subject][student.needs[subject]] += 1;
+      }
+    }
+
+    return counts;
+  }, [students]);
+
+  const roomsTotalBySubject = useMemo(
+    () =>
+      ({
+        kammi: HOMEROOMS.filter((room) => room.grade !== 12).length,
+        lafthi: HOMEROOMS.filter((room) => room.grade !== 12).length,
+        esl: HOMEROOMS.length,
+      }) as Record<LeveledSubject, number>,
+    []
+  );
+
+  const step0Issues = useMemo(() => {
+    const issues: PreFlightIssue[] = [];
+    // v1 assumption from product brief: treat rooms as constrained until spare-room modeling is added.
+    const noSpareRooms = true;
+
+    for (const subject of LEVELED_SUBJECTS) {
+      const demand = baseDemandBySubject[subject];
+      const totalDemand = LEVELS.reduce((sum, level) => sum + demand[level], 0);
+      const roomsTotal = roomsTotalBySubject[subject];
+      const roomsNeededForSubject = Math.ceil(totalDemand / PLANNING_ROOM_CAPACITY);
+      const roomsConstrained = noSpareRooms || roomsTotal <= roomsNeededForSubject;
+
+      for (const level of LEVELS) {
+        const levelDemand = demand[level];
+        const underfilled = levelDemand > 0 && levelDemand < PLANNING_ROOM_CAPACITY * 0.5;
+        if (!underfilled || !roomsConstrained) continue;
+
+        const remainingDemandIfRun = Math.max(0, totalDemand - levelDemand);
+        const roomsRemainingIfRun = Math.max(0, roomsTotal - 1);
+        const avgIfRun = roomsRemainingIfRun > 0 ? remainingDemandIfRun / roomsRemainingIfRun : remainingDemandIfRun;
+        const avgIfClose = roomsTotal > 0 ? totalDemand / roomsTotal : totalDemand;
+
+        if (level === "L2") {
+          const toL1 = Math.floor(levelDemand / 2);
+          const toL3 = Math.max(0, levelDemand - toL1);
+          issues.push({
+            id: `${subject}|${level}`,
+            subject,
+            level,
+            levelDemand,
+            totalDemand,
+            roomsTotal,
+            roomsRemainingIfRun,
+            remainingDemandIfRun,
+            avgIfRun,
+            avgIfClose,
+            closeMergeTarget: "L1+L3",
+            closeTargetCount: 0,
+            closeSplit: { toL1, toL3 },
+            closeSplitTargetCounts: { L1: demand.L1 + toL1, L3: demand.L3 + toL3 },
+          });
+          continue;
+        }
+
+        const targetLevel: "L2" = "L2";
+        issues.push({
+          id: `${subject}|${level}`,
+          subject,
+          level,
+          levelDemand,
+          totalDemand,
+          roomsTotal,
+          roomsRemainingIfRun,
+          remainingDemandIfRun,
+          avgIfRun,
+          avgIfClose,
+          closeMergeTarget: targetLevel,
+          closeTargetCount: demand[targetLevel] + levelDemand,
+        });
+      }
+    }
+
+    return issues;
+  }, [baseDemandBySubject, roomsTotalBySubject]);
+
+  useEffect(() => {
+    const validIds = new Set(step0Issues.map((issue) => issue.id));
+    setStep0Decisions((prev) => {
+      const next: Partial<Record<string, Step0Decision>> = {};
+      for (const [key, value] of Object.entries(prev)) {
+        if (!validIds.has(key)) continue;
+        next[key] = value;
+      }
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+  }, [step0Issues]);
+
+  const step0IssueCount = step0Issues.length;
+  const step0ResolvedIssueCount = useMemo(
+    () => step0Issues.filter((issue) => Boolean(step0Decisions[issue.id])).length,
+    [step0Issues, step0Decisions]
+  );
+
+  const levelPolicyBySubject = useMemo(() => {
+    const next: Record<LeveledSubject, Record<Level, LevelPolicyEntry>> = {
+      kammi: {
+        L1: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
+        L2: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
+        L3: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
+      },
+      lafthi: {
+        L1: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
+        L2: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
+        L3: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
+      },
+      esl: {
+        L1: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
+        L2: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
+        L3: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
+      },
+    };
+
+    const issueByKey = new Map(step0Issues.map((issue) => [issue.id, issue]));
+
+    for (const subject of LEVELED_SUBJECTS) {
+      const demand = baseDemandBySubject[subject];
+
+      for (const level of LEVELS) {
+        const levelDemand = demand[level];
+        const issue = issueByKey.get(`${subject}|${level}`);
+        const decision = issue ? step0Decisions[issue.id] : undefined;
+        const status: Step0Decision = levelDemand === 0 ? "CLOSE" : decision || "RUN";
+        const movedStudentsCount = status === "CLOSE" ? levelDemand : 0;
+        const mergeTargetLevel = status === "CLOSE" ? (level === "L2" ? "L1+L3" : "L2") : null;
+
+        next[subject][level] = {
+          status,
+          mergeTargetLevel,
+          movedStudentsCount,
+          roomCost: status === "RUN" ? 1 : 0,
+        };
+      }
+    }
+
+    return next;
+  }, [baseDemandBySubject, step0Issues, step0Decisions]);
+
+  const subjectsWithoutRunningLevels = useMemo(
+    () =>
+      LEVELED_SUBJECTS.filter((subject) => {
+        const totalDemand = LEVELS.reduce((sum, level) => sum + baseDemandBySubject[subject][level], 0);
+        if (totalDemand === 0) return false;
+        return LEVELS.every((level) => levelPolicyBySubject[subject][level].status === "CLOSE");
+      }),
+    [baseDemandBySubject, levelPolicyBySubject]
+  );
+
+  const step0Complete = useMemo(() => {
+    const allIssuesResolved = step0IssueCount === 0 || step0ResolvedIssueCount === step0IssueCount;
+    return allIssuesResolved && subjectsWithoutRunningLevels.length === 0;
+  }, [step0IssueCount, step0ResolvedIssueCount, subjectsWithoutRunningLevels.length]);
+
+  const routingPlans = useMemo<Record<LeveledSubject, SubjectRoutingPlan>>(() => {
+    const plans = defaultRoutingPlans();
+
+    for (const subject of LEVELED_SUBJECTS) {
+      const policy = levelPolicyBySubject[subject];
+      const demand = baseDemandBySubject[subject];
+
+      for (const level of LEVELS) {
+        plans[subject].run[level] = policy[level].status === "RUN" && demand[level] > 0;
+      }
+
+      if (policy.L1.status === "CLOSE" && demand.L1 > 0) {
+        const target: Level = plans[subject].run.L2 ? "L2" : "L3";
+        plans[subject].forceMove.L1 = { target, count: demand.L1 };
+      } else {
+        plans[subject].forceMove.L1 = { target: "L2", count: 0 };
+      }
+
+      if (policy.L3.status === "CLOSE" && demand.L3 > 0) {
+        const target: Level = plans[subject].run.L2 ? "L2" : "L1";
+        plans[subject].forceMove.L3 = { target, count: demand.L3 };
+      } else {
+        plans[subject].forceMove.L3 = { target: "L2", count: 0 };
+      }
+
+      if (policy.L2.status === "CLOSE" && demand.L2 > 0) {
+        if (plans[subject].run.L1 && plans[subject].run.L3) {
+          const toL1 = Math.floor(demand.L2 / 2);
+          plans[subject].forceMove.L2 = { toL1, toL3: demand.L2 - toL1 };
+        } else if (plans[subject].run.L1) {
+          plans[subject].forceMove.L2 = { toL1: demand.L2, toL3: 0 };
+        } else if (plans[subject].run.L3) {
+          plans[subject].forceMove.L2 = { toL1: 0, toL3: demand.L2 };
+        } else {
+          plans[subject].forceMove.L2 = { toL1: 0, toL3: 0 };
+        }
+      } else {
+        plans[subject].forceMove.L2 = { toL1: 0, toL3: 0 };
+      }
+    }
+
+    return plans;
+  }, [baseDemandBySubject, levelPolicyBySubject]);
+
   const policyLevelOpen = useMemo(() => levelOpenFromRouting(routingPlans), [routingPlans]);
 
   const computedWhitelist = useMemo(
     () => buildCampusWhitelist(selectedStreams, gradeCourseSelections, policyLevelOpen, STREAM_GROUPS),
     [selectedStreams, gradeCourseSelections, policyLevelOpen]
   );
-
-  const step0Complete = useMemo(
-    () => LEVELED_SUBJECTS.every((subject) => LEVELS.some((level) => routingPlans[subject].run[level])),
-    [routingPlans]
-  );
-
-  const step0ReadySubjectCount = useMemo(
-    () => LEVELED_SUBJECTS.filter((subject) => LEVELS.some((level) => routingPlans[subject].run[level])).length,
-    [routingPlans]
-  );
-
-  const step0DemandBySubject = useMemo(() => buildStep0DemandBySubject(students, routingPlans), [students, routingPlans]);
 
   const subjectPreviews = useMemo(() => {
     const previews: Partial<Record<LeveledSubject, ReturnType<typeof buildRoomMapPreview>>> = {};
@@ -421,7 +627,6 @@ export default function AppV6() {
   const step2Ready = step2Complete && !step2HardBlocked;
 
   const campusFlowComplete = step0Complete && step1Complete && step2Ready;
-  const g12DoneQCount = useMemo(() => students.filter((student) => student.grade === 12 && student.doneQ).length, [students]);
   const hasStep1Progress = useMemo(() => LEVELED_SUBJECTS.some((subject) => Boolean(selectedStreams[subject])), [selectedStreams]);
   const hasStep2Progress = useMemo(
     () => Object.values(gradeCourseSelections).some((selection) => Object.values(selection || {}).some((courseId) => Boolean(courseId))),
@@ -437,6 +642,12 @@ export default function AppV6() {
       setActiveCampusStep(1);
     }
   }, [step0Complete, step1Complete, activeCampusStep]);
+
+  useEffect(() => {
+    if (activeCampusStep === 0 && step0IssueCount === 0 && step0Complete) {
+      setActiveCampusStep(1);
+    }
+  }, [activeCampusStep, step0IssueCount, step0Complete]);
 
   useEffect(() => {
     if (activeCampusStep !== 2) {
@@ -584,112 +795,12 @@ export default function AppV6() {
     setPage("homeroom");
   }, [step2BlockingIssues, computedWhitelist, selectedStreams, subjectPreviews, gradeCourseSelections, courses, students, t]);
 
-  const toggleRunLevel = useCallback((subject: LeveledSubject, level: Level) => {
-    const willRun = !routingPlans[subject].run[level];
-
-    setRoutingPlans((prev) => {
-      const nextSubject = {
-        ...prev[subject],
-        run: {
-          ...prev[subject].run,
-          [level]: willRun,
-        },
-      };
-
-      if (willRun) {
-        if (level === "L2") {
-          nextSubject.forceMove = {
-            ...nextSubject.forceMove,
-            L2: { toL1: 0, toL3: 0 },
-          };
-        } else {
-          nextSubject.forceMove = {
-            ...nextSubject.forceMove,
-            [level]: {
-              ...nextSubject.forceMove[level as "L1" | "L3"],
-              count: 0,
-            },
-          };
-        }
-      }
-
-      return {
-        ...prev,
-        [subject]: nextSubject,
-      };
-    });
-
-    if (willRun) {
-      setForceMovePanels((prev) => ({
-        ...prev,
-        [subject]: {
-          ...prev[subject],
-          [level]: false,
-        },
-      }));
-    }
-
-    setHostOverrides((prev) => ({ ...prev, [subject]: {} }));
-  }, [routingPlans]);
-
-  const toggleForceMovePanel = useCallback((subject: LeveledSubject, level: Level) => {
-    setForceMovePanels((prev) => ({
+  const setIssueDecision = useCallback((issue: PreFlightIssue, decision: Step0Decision) => {
+    setStep0Decisions((prev) => ({
       ...prev,
-      [subject]: {
-        ...prev[subject],
-        [level]: !prev[subject][level],
-      },
+      [issue.id]: decision,
     }));
-  }, []);
-
-  const setSingleForceMoveTarget = useCallback((subject: LeveledSubject, source: "L1" | "L3", target: Level) => {
-    setRoutingPlans((prev) => ({
-      ...prev,
-      [subject]: {
-        ...prev[subject],
-        forceMove: {
-          ...prev[subject].forceMove,
-          [source]: {
-            ...prev[subject].forceMove[source],
-            target,
-          },
-        },
-      },
-    }));
-  }, []);
-
-  const setSingleForceMoveCount = useCallback((subject: LeveledSubject, source: "L1" | "L3", value: string) => {
-    const count = Number.parseInt(value, 10);
-    setRoutingPlans((prev) => ({
-      ...prev,
-      [subject]: {
-        ...prev[subject],
-        forceMove: {
-          ...prev[subject].forceMove,
-          [source]: {
-            ...prev[subject].forceMove[source],
-            count: Number.isFinite(count) ? Math.max(0, count) : 0,
-          },
-        },
-      },
-    }));
-  }, []);
-
-  const setSplitForceMoveCount = useCallback((subject: LeveledSubject, key: "toL1" | "toL3", value: string) => {
-    const count = Number.parseInt(value, 10);
-    setRoutingPlans((prev) => ({
-      ...prev,
-      [subject]: {
-        ...prev[subject],
-        forceMove: {
-          ...prev[subject].forceMove,
-          L2: {
-            ...prev[subject].forceMove.L2,
-            [key]: Number.isFinite(count) ? Math.max(0, count) : 0,
-          },
-        },
-      },
-    }));
+    setHostOverrides((prev) => ({ ...prev, [issue.subject]: {} }));
   }, []);
 
   const pickStream = useCallback((subject: LeveledSubject, streamGroupId: string) => {
@@ -998,7 +1109,11 @@ export default function AppV6() {
                       <div className="step-mini">
                         <div>
                           <div className="step-mini-title">{t.cycleStep0CompleteTitle}</div>
-                          <div className="step-mini-copy">{fmt("cycleStep0CompleteCopy", { ready: step0ReadySubjectCount, total: LEVELED_SUBJECTS.length })}</div>
+                          <div className="step-mini-copy">
+                            {step0IssueCount === 0
+                              ? t.cycleStep0NoIssuesCopy
+                              : fmt("cycleStep0CompleteCopy", { resolved: step0ResolvedIssueCount, total: step0IssueCount })}
+                          </div>
                         </div>
                         <button className="step-mini-btn" onClick={() => jumpBackToStep(0)}>
                           {t.cycleEditStep0}
@@ -1018,163 +1133,78 @@ export default function AppV6() {
                       </div>
                     )}
 
-                    {activeCampusStep === 0 && (
+                    {activeCampusStep === 0 && step0IssueCount > 0 && (
                       <div className="card step-focus">
                         <div className="card-t">{t.v6Step0Title}</div>
                         <div className="step-inline-note" style={{ marginBottom: 10 }}>
-                          {fmt("v6DoneQExcludedNote", { count: g12DoneQCount })}
+                          {t.preflightSubtitle}
                         </div>
 
-                        <div style={{ overflowX: "auto" }}>
-                          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
-                            <colgroup>
-                              <col style={{ width: "28%" }} />
-                              <col style={{ width: "24%" }} />
-                              <col style={{ width: "24%" }} />
-                              <col style={{ width: "24%" }} />
-                            </colgroup>
-                            <thead>
-                              <tr>
-                                <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>
-                                  {t.subject}
-                                </th>
-                                <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L1</th>
-                                <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L2</th>
-                                <th style={{ textAlign: "start", fontSize: 10, fontWeight: 900, color: "#94908A", padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textTransform: "uppercase", letterSpacing: 0.6, background: "#F5F3EE" }}>L3</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {LEVELED_SUBJECTS.map((subject, index) => {
-                                const demand = step0DemandBySubject[subject];
-                                const subjectDef = SUBJECTS[subject];
-                                const routing = routingPlans[subject];
-                                const forcePanels = forceMovePanels[subject];
-                                return (
-                                  <tr key={subject} style={{ background: index % 2 ? "#FAFAF7" : "#fff" }}>
-                                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                                      <div style={{ fontSize: 12, fontWeight: 900, color: subjectDef.color }}>{subjectLabel(subject)}</div>
-                                      <div className="step-inline-note" style={{ marginTop: 6 }}>
-                                        {fmt("step0LevelsRunningSummary", {
-                                          running: LEVELS.filter((level) => routing.run[level]).length,
-                                          moved: demand.mergedCount,
-                                        })}
-                                      </div>
-                                    </td>
-                                    {LEVELS.map((level) => {
-                                      const run = routing.run[level];
-                                      const baseCount = demand.base[level];
-                                      const forceOpen = forcePanels[level];
-                                      const source = routing.forceMove[level as "L1" | "L2" | "L3"];
-                                      const remaining = (() => {
-                                        if (level === "L2") {
-                                          return Math.max(0, baseCount - routing.forceMove.L2.toL1 - routing.forceMove.L2.toL3);
-                                        }
-                                        return Math.max(0, baseCount - (source as { count: number }).count);
-                                      })();
-
-                                      return (
-                                        <td key={level} className="step0-level-cell" style={{ verticalAlign: "top", paddingBottom: 12 }}>
-                                          <div className="step0-level-count">{baseCount} {t.studentsCount}</div>
-                                          <label className="step0-run-check">
-                                            <span>{t.activate}</span>
-                                            <input
-                                              type="checkbox"
-                                              checked={run}
-                                              onChange={() => toggleRunLevel(subject, level)}
-                                              aria-label={`${t.activate} ${subjectLabel(subject)} ${level}`}
-                                            />
-                                          </label>
-
-                                          <div style={{ marginTop: 8 }}>
-                                            <button
-                                              type="button"
-                                              className={cx("gcr-opt", !run && "on")}
-                                              disabled={run}
-                                              onClick={() => {
-                                                if (run) return;
-                                                toggleForceMovePanel(subject, level);
-                                              }}
-                                              style={run ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
-                                            >
-                                              {level === "L2" ? t.split : t.forceMove}
-                                            </button>
-                                          </div>
-
-                                          {!run && forceOpen && (
-                                            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                                              {level === "L2" ? (
-                                                <>
-                                                  <label style={{ fontSize: 11, color: "#6B665F" }}>
-                                                    {t.moveToL1}
-                                                    <input
-                                                      type="number"
-                                                      min={0}
-                                                      max={baseCount}
-                                                      value={routing.forceMove.L2.toL1}
-                                                      onChange={(event) => setSplitForceMoveCount(subject, "toL1", event.target.value)}
-                                                      style={{ marginTop: 4, width: "100%" }}
-                                                    />
-                                                  </label>
-                                                  <label style={{ fontSize: 11, color: "#6B665F" }}>
-                                                    {t.moveToL3}
-                                                    <input
-                                                      type="number"
-                                                      min={0}
-                                                      max={baseCount}
-                                                      value={routing.forceMove.L2.toL3}
-                                                      onChange={(event) => setSplitForceMoveCount(subject, "toL3", event.target.value)}
-                                                      style={{ marginTop: 4, width: "100%" }}
-                                                    />
-                                                  </label>
-                                                </>
-                                              ) : (
-                                                <>
-                                                  <label style={{ fontSize: 11, color: "#6B665F" }}>
-                                                    {t.destination}
-                                                    <select
-                                                      value={routing.forceMove[level].target}
-                                                      onChange={(event) => setSingleForceMoveTarget(subject, level as "L1" | "L3", event.target.value as Level)}
-                                                      style={{ marginTop: 4, width: "100%" }}
-                                                    >
-                                                      {LEVELS.filter((target) => target !== level).map((target) => (
-                                                        <option key={`${subject}-${level}-${target}`} value={target}>
-                                                          {target}
-                                                        </option>
-                                                      ))}
-                                                    </select>
-                                                  </label>
-                                                  <label style={{ fontSize: 11, color: "#6B665F" }}>
-                                                    {t.studentsToMove}
-                                                    <input
-                                                      type="number"
-                                                      min={0}
-                                                      max={baseCount}
-                                                      value={routing.forceMove[level].count}
-                                                      onChange={(event) => setSingleForceMoveCount(subject, level as "L1" | "L3", event.target.value)}
-                                                      style={{ marginTop: 4, width: "100%" }}
-                                                    />
-                                                  </label>
-                                                </>
-                                              )}
-                                              <span style={{ fontSize: 10, color: "#6B665F", fontWeight: 700 }}>
-                                                {fmt("remainInLevel", { count: remaining, level })}
-                                              </span>
-                                            </div>
-                                          )}
-                                        </td>
-                                      );
-                                    })}
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
+                        <div className="preflight-list">
+                          {step0Issues.map((issue) => {
+                            const decision = step0Decisions[issue.id];
+                            const closeLine = issue.closeSplit
+                              ? fmt("preflightCloseSplitLine", {
+                                count: issue.levelDemand,
+                                toL1: issue.closeSplit.toL1,
+                                toL3: issue.closeSplit.toL3,
+                                l1Count: issue.closeSplitTargetCounts?.L1 ?? 0,
+                                l3Count: issue.closeSplitTargetCounts?.L3 ?? 0,
+                              })
+                              : fmt("preflightCloseLine", {
+                                count: issue.levelDemand,
+                                target: issue.closeMergeTarget,
+                                targetCount: issue.closeTargetCount,
+                              });
+                            return (
+                              <div key={issue.id} className="preflight-card">
+                                <div className="preflight-title">
+                                  {fmt("preflightIssueTitle", {
+                                    subject: subjectLabel(issue.subject),
+                                    level: issue.level,
+                                  })}
+                                </div>
+                                <div className="preflight-fact">{fmt("preflightIssueFact", { count: issue.levelDemand, level: issue.level })}</div>
+                                <div className="preflight-fact">
+                                  {fmt("preflightConstraintLine", {
+                                    level: issue.level,
+                                    roomsTotal: issue.roomsTotal,
+                                    roomsRemaining: issue.roomsRemainingIfRun,
+                                    remaining: issue.remainingDemandIfRun,
+                                  })}
+                                </div>
+                                <div className="preflight-metrics">
+                                  <div>{fmt("preflightIfRun", { avg: fmtAvg(issue.avgIfRun) })}</div>
+                                  <div>{closeLine}</div>
+                                  <div>{fmt("preflightIfCloseAvg", { avg: fmtAvg(issue.avgIfClose) })}</div>
+                                </div>
+                                <div className="preflight-actions">
+                                  <button
+                                    className={cx("preflight-btn", decision === "RUN" && "on")}
+                                    onClick={() => setIssueDecision(issue, "RUN")}
+                                  >
+                                    {fmt("preflightRunAnyway", { subject: subjectLabel(issue.subject), level: issue.level })}
+                                  </button>
+                                  <button
+                                    className={cx("preflight-btn", decision === "CLOSE" && "on")}
+                                    onClick={() => setIssueDecision(issue, "CLOSE")}
+                                  >
+                                    {issue.closeSplit
+                                      ? fmt("preflightCloseSplit", { level: issue.level })
+                                      : fmt("preflightCloseSingle", { level: issue.level, target: issue.closeMergeTarget })}
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
 
                         <div className="step-inline-note" style={{ marginTop: 10 }}>
                           {step0Complete
                             ? t.readyForStep1
-                            : fmt("step0ProgressLine", { ready: step0ReadySubjectCount, total: LEVELED_SUBJECTS.length })}
+                            : step0ResolvedIssueCount < step0IssueCount
+                              ? fmt("preflightResolveLine", { resolved: step0ResolvedIssueCount, total: step0IssueCount })
+                              : fmt("preflightNeedRunningLevelLine", { subjects: subjectsWithoutRunningLevels.map((subject) => subjectLabel(subject)).join(", ") })}
                         </div>
                         <div className="step-actions">
                           <button className="apply-btn" disabled={!step0Complete} onClick={() => setActiveCampusStep(1)}>

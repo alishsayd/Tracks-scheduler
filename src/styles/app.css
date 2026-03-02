@@ -375,6 +375,70 @@ body {
   color: #6B665F;
 }
 
+.preflight-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.preflight-card {
+  border: 1px solid #E8E4DD;
+  border-radius: 10px;
+  background: #FAFAF7;
+  padding: 12px;
+}
+
+.preflight-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #1a1a1a;
+}
+
+.preflight-fact {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #4B4742;
+}
+
+.preflight-metrics {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #6B665F;
+}
+
+.preflight-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.preflight-btn {
+  border: 1px solid #D9D4CA;
+  background: #fff;
+  color: #4B4742;
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .12s;
+}
+
+.preflight-btn:hover {
+  border-color: #BEB8AD;
+}
+
+.preflight-btn.on {
+  border-color: #1a1a1a;
+  background: #1a1a1a;
+  color: #fff;
+}
+
 .step-actions {
   margin-top: 12px;
   display: flex;
