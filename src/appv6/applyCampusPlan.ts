@@ -3,7 +3,6 @@ import { autoAssignTahsiliForQudrat } from "../domain/plannerV6";
 import type { RoomMapPreview } from "../domain/plannerV6";
 import type { Assignments, Course, Homeroom, LeveledSubject, Level, StreamGroup } from "../domain/types";
 import type { GradeCourseSelections, SelectedStreams } from "../domain/planner";
-import type { ConflictFlag } from "./campusFlow";
 
 type BuildCampusAssignmentsParams = {
   whitelist: Set<string>;
@@ -60,8 +59,6 @@ export function buildCampusAssignments({
     }
   }
 
-  const conflicts: ConflictFlag[] = [];
-
   for (const [gradeRaw, selection] of Object.entries(gradeCourseSelections)) {
     const grade = Number(gradeRaw);
     const gradeRooms = homerooms.filter((room) => room.grade === grade);
@@ -75,21 +72,11 @@ export function buildCampusAssignments({
         if (!assignments[room.id]) assignments[room.id] = {};
         for (const meeting of course.meetings) {
           if (!assignments[room.id][meeting.day]) assignments[room.id][meeting.day] = {};
-          const existing = assignments[room.id][meeting.day]![meeting.slot];
-          if (existing && existing !== course.id) {
-            conflicts.push({
-              roomId: room.id,
-              day: meeting.day,
-              slotId: meeting.slot,
-              previousCourseId: existing,
-              nextCourseId: course.id,
-            });
-          }
           assignments[room.id][meeting.day]![meeting.slot] = course.id;
         }
       }
     }
   }
 
-  return { assignments, conflicts };
+  return { assignments };
 }

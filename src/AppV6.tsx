@@ -11,7 +11,6 @@ import {
   getAssignment,
   getAvailableCourses,
   scheduleStats,
-  unresolvedMoves,
   type GradeCourseSelections,
   type SelectedStreams,
 } from "./domain/planner";
@@ -39,7 +38,6 @@ import {
   canSatisfyRequiredGradeWideSubjects,
   isMeetingBlockedByLeveled,
   LEVELED_SUBJECTS,
-  type ConflictFlag,
   type PreFlightIssue,
   type Step0Decision,
   buildBaseDemandBySubject,
@@ -111,7 +109,6 @@ export default function AppV6() {
     esl: {},
   });
   const [gradeCourseSelections, setGradeCourseSelections] = useState<GradeCourseSelections>({});
-  const [step2Conflicts, setStep2Conflicts] = useState<ConflictFlag[]>([]);
   const [campusWhitelist, setCampusWhitelist] = useState<Set<string> | null>(null);
   const [activeCampusStep, setActiveCampusStep] = useState<0 | 1 | 2>(0);
   const [step2Collapsed, setStep2Collapsed] = useState(false);
@@ -430,7 +427,6 @@ export default function AppV6() {
     setSelectedStreams({});
     setHostOverrides({ kammi: {}, lafthi: {}, esl: {} });
     setGradeCourseSelections({});
-    setStep2Conflicts([]);
     setCampusWhitelist(null);
     setAssignments({});
     setMoveResolutions({});
@@ -439,7 +435,6 @@ export default function AppV6() {
 
   const resetFromStep1 = useCallback(() => {
     setGradeCourseSelections({});
-    setStep2Conflicts([]);
     setCampusWhitelist(null);
     setAssignments({});
     setMoveResolutions({});
@@ -477,7 +472,7 @@ export default function AppV6() {
     const whitelist = new Set(computedWhitelist);
     setCampusWhitelist(whitelist);
 
-    const { assignments: nextAssignments, conflicts } = buildCampusAssignments({
+    const { assignments: nextAssignments } = buildCampusAssignments({
       whitelist,
       selectedStreams,
       subjectPreviews,
@@ -487,7 +482,6 @@ export default function AppV6() {
       streamGroups: STREAM_GROUPS,
     });
 
-    setStep2Conflicts(conflicts);
     const autoResolvedMoves = autoResolveMustMoves(nextAssignments, courses, students, whitelist, t, HOMEROOMS);
     setMoveResolutions(autoResolvedMoves);
     setAssignments(nextAssignments);
@@ -585,12 +579,7 @@ export default function AppV6() {
     setMoveModal(null);
   }, []);
 
-  const unresolved = useMemo(
-    () => unresolvedMoves(assignments, courses, students, moveResolutions, campusWhitelist, t, HOMEROOMS),
-    [assignments, courses, students, moveResolutions, campusWhitelist, t]
-  );
-
-  const stats = useMemo(() => scheduleStats(assignments, unresolved.length, HOMEROOMS), [assignments, unresolved.length]);
+  const stats = useMemo(() => scheduleStats(assignments, HOMEROOMS), [assignments]);
 
   const sidePanelData = useMemo(() => {
     if (!sidePanel) return null;
@@ -753,7 +742,7 @@ export default function AppV6() {
           </div>
           <div className="pills">
             <div className="topbar-stat">
-              {stats.filled}/{stats.total} {t.slots} · {stats.unresolved} {t.moves}
+              {stats.filled}/{stats.total} {t.slots}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginInlineStart: 6 }}>
               <span style={{ fontSize: 11, color: "#94908A" }}>{t.language}</span>
@@ -781,10 +770,6 @@ export default function AppV6() {
           </button>
           <button className={cx("nt", page === "homeroom" && "on")} onClick={() => setPage("homeroom")}>
             {t.homerooms}
-          </button>
-          <button className={cx("nt", page === "reconciliation" && "on")} onClick={() => setPage("reconciliation")}>
-            {t.reconciliation}
-            {unresolved.length + step2Conflicts.length > 0 && <span className="nbadge">{unresolved.length + step2Conflicts.length}</span>}
           </button>
         </div>
 
@@ -1307,104 +1292,6 @@ export default function AppV6() {
               </>
             )}
 
-            {page === "reconciliation" &&
-              (unresolved.length === 0 && step2Conflicts.length === 0 ? (
-                <div className="rc-empty">
-                  <div className="rc-ei">{stats.filled === stats.total ? "🎉" : "📋"}</div>
-                  <div className="rc-et">{stats.filled === stats.total ? t.scheduleComplete : t.noUnresolvedMoves}</div>
-                  <div className="rc-es">{stats.filled < stats.total ? `${stats.total - stats.filled} ${t.emptySlots}` : t.allResolved}</div>
-                </div>
-              ) : (
-                <>
-                  {step2Conflicts.length > 0 && (
-                    <div className="rc">
-                      <div className="rc-hd">
-                        <span className="rc-d">{t.step2OverwriteConflicts}</span>
-                        <span className="rc-sl">{t.manualReconciliationRequired}</span>
-                        <span className="rc-c">{step2Conflicts.length}</span>
-                      </div>
-                      <div className="rc-bd">
-                        {step2Conflicts.map((conflict, index) => {
-                          const room = HOMEROOMS.find((entry) => entry.id === conflict.roomId);
-                          const previousCourse = getCourse(conflict.previousCourseId);
-                          const nextCourse = getCourse(conflict.nextCourseId);
-                          const slot = SLOTS.find((entry) => entry.id === conflict.slotId);
-                          return (
-                            <div key={`${conflict.roomId}-${conflict.day}-${conflict.slotId}-${index}`} className="rc-st">
-                              <span className="sr-n" style={{ flex: 1, fontWeight: 800 }}>
-                                {room ? roomLabel(room.name) : ""}
-                              </span>
-                                <span className="sr-g">{dayLabel(conflict.day)} {slot?.start}</span>
-                                <span style={{ fontSize: 10, color: "#94908A" }}>
-                                  {previousCourse ? courseLabel(previousCourse, lang) : t.unknown} {"->"} {nextCourse ? courseLabel(nextCourse, lang) : t.unknown}
-                                </span>
-                              </div>
-                            );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {(() => {
-                    if (unresolved.length === 0) return null;
-
-                    const grouped: Record<
-                      string,
-                      {
-                        blockKey: string;
-                        day: (typeof unresolved)[number]["day"];
-                        slotId: number;
-                        students: Array<(typeof unresolved)[number]>;
-                      }
-                    > = {};
-                    for (const move of unresolved) {
-                      const key = move.blockKey || `${move.day}-${move.slotId}`;
-                      if (!grouped[key]) grouped[key] = { blockKey: key, day: move.day, slotId: move.slotId, students: [] };
-                      grouped[key].students.push(move);
-                    }
-
-                    return Object.values(grouped).map((group) => {
-                      const slot = SLOTS.find((entry) => entry.id === group.slotId);
-                      return (
-                        <div key={group.blockKey} className="rc">
-                          <div className="rc-hd">
-                            <span className="rc-d">{subjectLabel(group.blockKey.split("|")[0] as SubjectKey)}</span>
-                            <span className="rc-sl">{dayLabel(group.day)} · {slot?.start}–{slot?.end}</span>
-                            <span className="rc-c">{group.students.length}</span>
-                          </div>
-                          <div className="rc-bd">
-                            {group.students.map((student) => {
-                              const fromRoom = HOMEROOMS.find((room) => room.id === student.fromRoom);
-                              return (
-                                <div key={`${student.id}-${group.blockKey}`} className="rc-st">
-                                  <span className="sr-n" style={{ flex: 1, fontWeight: 800 }}>{personLabel(student.name)}</span>
-                                  <span className="sr-g">{t.grade} {student.grade}</span>
-                                  <span style={{ fontSize: 10, color: "#94908A" }}>{fromRoom ? roomLabel(fromRoom.name) : ""}</span>
-                                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "#FEF3C7", color: "#B45309" }}>{student.neededLabel}</span>
-                                  <button
-                                    className="sr-btn"
-                                    onClick={() =>
-                                      setMoveModal({
-                                        studentId: student.id,
-                                        day: group.day,
-                                        slotId: group.slotId,
-                                        options: student.options,
-                                        blockKey: group.blockKey,
-                                      })
-                                    }
-                                  >
-                                    {t.assign}
-                                  </button>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    });
-                  })()}
-                </>
-              ))}
           </div>
 
           {sidePanel && sidePanelData && page === "homeroom" && (

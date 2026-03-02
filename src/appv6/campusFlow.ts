@@ -33,14 +33,6 @@ export interface LevelPolicyEntry {
   roomCost: 0 | 1;
 }
 
-export interface ConflictFlag {
-  roomId: number;
-  day: Day;
-  slotId: number;
-  previousCourseId: string;
-  nextCourseId: string;
-}
-
 export interface Step2SubjectOptionState {
   grade: number;
   subject: SubjectKey;

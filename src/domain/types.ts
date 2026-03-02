@@ -6,7 +6,7 @@ export type LeveledSubject = "kammi" | "lafthi" | "esl";
 export type GradeWideSubject = "ministry" | "future" | "t_math" | "t_chem" | "t_bio" | "t_physics";
 export type SubjectKey = LeveledSubject | GradeWideSubject;
 
-export type TabPage = "campus" | "homeroom" | "reconciliation";
+export type TabPage = "campus" | "homeroom";
 
 export interface Slot {
   id: number;

@@ -70,7 +70,7 @@ export function getAvailableCourses(
   });
 }
 
-export function scheduleStats(assignments: Assignments, unresolvedCount: number, homerooms: Homeroom[]) {
+export function scheduleStats(assignments: Assignments, homerooms: Homeroom[]) {
   let total = 0;
   let filled = 0;
 
@@ -86,7 +86,7 @@ export function scheduleStats(assignments: Assignments, unresolvedCount: number,
   return {
     total,
     filled,
-    unresolved: unresolvedCount,
-    done: filled === total && unresolvedCount === 0,
+    unresolved: 0,
+    done: filled === total,
   };
 }
