@@ -398,35 +398,84 @@ export function autoResolveMustMoves(
   homerooms: Homeroom[]
 ) {
   const resolutions: MoveResolutions = {};
+  const homeroomById = new Map(homerooms.map((room) => [room.id, room]));
+  const clusteredAssignmentsByBlock = new Map<string, Record<number, number>>();
   const pending = unresolvedMoves(assignments, courses, students, resolutions, whitelist, t, homerooms).sort((a, b) => {
     if (a.blockKey !== b.blockKey) return a.blockKey.localeCompare(b.blockKey);
     if (a.fromRoom !== b.fromRoom) return a.fromRoom - b.fromRoom;
     return a.id.localeCompare(b.id);
   });
 
+  const scoreOptions = (
+    move: (typeof pending)[number],
+    countsByRoom: Record<number, number>
+  ) =>
+    move.options
+      .map((option) => {
+        const room = homeroomById.get(option.roomId);
+        if (!room) return null;
+
+        const current = effectiveRoomCountForBlock(students, resolutions, move.blockKey, option.roomId);
+        const remaining = room.capacity - current;
+        return {
+          option,
+          room,
+          current,
+          remaining,
+          clustered: countsByRoom[option.roomId] || 0,
+          sameGrade: room.grade === move.grade,
+        };
+      })
+      .filter(Boolean) as Array<{
+      option: { roomId: number; courseId: string };
+      room: Homeroom;
+      current: number;
+      remaining: number;
+      clustered: number;
+      sameGrade: boolean;
+    }>;
+
+  const pickBestOption = (move: (typeof pending)[number]) => {
+    const clusterKey = `${move.blockKey}|g${move.grade}`;
+    const countsByRoom = clusteredAssignmentsByBlock.get(clusterKey) || {};
+    const scored = scoreOptions(move, countsByRoom);
+    if (scored.length === 0) return null;
+
+    const sameGrade = scored.filter((entry) => entry.sameGrade);
+    const sameGradeWithSeats = sameGrade.filter((entry) => entry.remaining > 0);
+    const withSeats = scored.filter((entry) => entry.remaining > 0);
+
+    let pool = scored;
+    if (sameGradeWithSeats.length > 0) {
+      pool = sameGradeWithSeats;
+    } else if (sameGrade.length > 0 && withSeats.length > 0) {
+      // Only mix across grades after same-grade rooms have no available seats.
+      pool = withSeats.filter((entry) => !entry.sameGrade);
+    } else if (sameGrade.length > 0) {
+      pool = sameGrade;
+    } else if (withSeats.length > 0) {
+      pool = withSeats;
+    }
+
+    const best = pool.sort((a, b) => {
+      if (b.clustered !== a.clustered) return b.clustered - a.clustered;
+      if (b.remaining !== a.remaining) return b.remaining - a.remaining;
+      if (a.current !== b.current) return a.current - b.current;
+      return a.option.roomId - b.option.roomId;
+    })[0];
+
+    if (!best) return null;
+
+    const nextCountsByRoom = { ...countsByRoom, [best.option.roomId]: (countsByRoom[best.option.roomId] || 0) + 1 };
+    clusteredAssignmentsByBlock.set(clusterKey, nextCountsByRoom);
+    return best.option;
+  };
+
   for (const move of pending) {
     const existing = resolutions[move.id]?.[move.blockKey];
     if (existing !== undefined && existing !== null) continue;
 
-    const bestOption = move.options
-      .slice()
-      .sort((a, b) => {
-        const roomA = homerooms.find((room) => room.id === a.roomId);
-        const roomB = homerooms.find((room) => room.id === b.roomId);
-
-        const capA = roomA?.capacity ?? 0;
-        const capB = roomB?.capacity ?? 0;
-
-        const currentA = effectiveRoomCountForBlock(students, resolutions, move.blockKey, a.roomId);
-        const currentB = effectiveRoomCountForBlock(students, resolutions, move.blockKey, b.roomId);
-
-        const remainingA = capA - currentA;
-        const remainingB = capB - currentB;
-
-        if (remainingB !== remainingA) return remainingB - remainingA;
-        if (currentA !== currentB) return currentA - currentB;
-        return a.roomId - b.roomId;
-      })[0];
+    const bestOption = pickBestOption(move);
 
     if (!bestOption) continue;
 

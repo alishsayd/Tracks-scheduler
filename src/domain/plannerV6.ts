@@ -384,11 +384,51 @@ export function buildRoomMapPreview(
   }
 
   const assignedCounts: Record<number, number> = {};
+  const moveInsByRoom: Record<number, number> = {};
   for (const room of homerooms) {
     assignedCounts[room.id] = 0;
+    moveInsByRoom[room.id] = 0;
   }
 
   const roomCap = Object.fromEntries(homerooms.map((room) => [room.id, room.capacity])) as Record<number, number>;
+  const pickDestinationRoom = (candidateRooms: Homeroom[], studentGrade: number) => {
+    const scored = candidateRooms.map((room) => {
+      const current = assignedCounts[room.id] ?? 0;
+      const remaining = (roomCap[room.id] ?? 0) - current;
+      return {
+        room,
+        current,
+        remaining,
+        clustered: moveInsByRoom[room.id] ?? 0,
+        sameGrade: room.grade === studentGrade,
+      };
+    });
+
+    const sameGrade = scored.filter((entry) => entry.sameGrade);
+    const sameGradeWithSeats = sameGrade.filter((entry) => entry.remaining > 0);
+    const withSeats = scored.filter((entry) => entry.remaining > 0);
+
+    let pool = scored;
+    if (sameGradeWithSeats.length > 0) {
+      pool = sameGradeWithSeats;
+    } else if (sameGrade.length > 0 && withSeats.length > 0) {
+      // Only mix across grades after same-grade rooms have no available seats.
+      pool = withSeats.filter((entry) => !entry.sameGrade);
+    } else if (sameGrade.length > 0) {
+      pool = sameGrade;
+    } else if (withSeats.length > 0) {
+      pool = withSeats;
+    }
+
+    return pool
+      .slice()
+      .sort((a, b) => {
+        if (b.clustered !== a.clustered) return b.clustered - a.clustered;
+        if (b.remaining !== a.remaining) return b.remaining - a.remaining;
+        if (a.current !== b.current) return a.current - b.current;
+        return a.room.id - b.room.id;
+      })[0]?.room;
+  };
 
   const placements: Record<string, number> = {};
   let forcedStays = 0;
@@ -430,17 +470,17 @@ export function buildRoomMapPreview(
       continue;
     }
 
-    const chosen = candidateRooms
-      .slice()
-      .sort((a, b) => {
-        const aRemaining = (roomCap[a.id] ?? 0) - (assignedCounts[a.id] ?? 0);
-        const bRemaining = (roomCap[b.id] ?? 0) - (assignedCounts[b.id] ?? 0);
-        if (bRemaining !== aRemaining) return bRemaining - aRemaining;
-        return a.id - b.id;
-      })[0];
+    const chosen = pickDestinationRoom(candidateRooms, student.grade);
+    if (!chosen) {
+      placements[student.id] = student.homeroom;
+      assignedCounts[student.homeroom] += 1;
+      forcedStays += 1;
+      continue;
+    }
 
     placements[student.id] = chosen.id;
     assignedCounts[chosen.id] += 1;
+    moveInsByRoom[chosen.id] += 1;
   }
 
   const rows: RoomMapRow[] = homerooms.map((room) => {

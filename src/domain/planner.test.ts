@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { buildHomerooms, getDefaultAdminConfig } from "./adminConfig";
 import { buildStreamGroups, genCourses, genStudents } from "./data";
 import { courseMatchesStudent } from "./rules";
-import { buildCampusWhitelist, demandSnapshot, seedAssignmentsFromCampusPlan, unresolvedMoves } from "./planner";
+import { autoResolveMustMoves, buildCampusWhitelist, demandSnapshot, seedAssignmentsFromCampusPlan, unresolvedMoves } from "./planner";
 import { getT } from "./i18n";
-import type { Student } from "./types";
+import type { Assignments, Course, Homeroom, Student } from "./types";
 import type { LevelOpenState, SelectedStreams } from "./planner";
 
 const adminConfig = getDefaultAdminConfig();
@@ -66,5 +66,159 @@ describe("stream planner domain", () => {
   it("produces demand snapshot totals", () => {
     const snapshot = demandSnapshot(students);
     expect(snapshot.doneQ + snapshot.stillQ).toBe(students.length);
+  });
+
+  it("prefers same-grade move destinations before cross-grade rooms", () => {
+    const localHomerooms: Homeroom[] = [
+      { id: 0, name: "Room 101", grade: 10, capacity: 30 },
+      { id: 1, name: "Room 102", grade: 10, capacity: 2 },
+      { id: 2, name: "Room 201", grade: 11, capacity: 10 },
+    ];
+
+    const localCourses: Course[] = [
+      {
+        id: "c-l1",
+        subject: "kammi",
+        level: "L1",
+        grade: null,
+        segment: null,
+        teacherName: "T1",
+        startTime: "07:45",
+        meetings: [{ day: "Sun", slot: 1 }],
+        pattern: "Sun",
+      },
+      {
+        id: "c-l2-a",
+        subject: "kammi",
+        level: "L2",
+        grade: null,
+        segment: null,
+        teacherName: "T2",
+        startTime: "07:45",
+        meetings: [{ day: "Sun", slot: 1 }],
+        pattern: "Sun",
+      },
+      {
+        id: "c-l2-b",
+        subject: "kammi",
+        level: "L2",
+        grade: null,
+        segment: null,
+        teacherName: "T3",
+        startTime: "07:45",
+        meetings: [{ day: "Sun", slot: 1 }],
+        pattern: "Sun",
+      },
+    ];
+
+    const localStudents: Student[] = Array.from({ length: 4 }, (_, index) => ({
+      id: `s${index + 1}`,
+      name: `Student ${index + 1}`,
+      homeroom: 0,
+      grade: 10,
+      doneQ: false,
+      done: { kammi: false, lafthi: false, esl: false },
+      needs: { kammi: "L2", lafthi: "L1", esl: "L1" },
+      strength: 0.5,
+    }));
+
+    const localAssignments: Assignments = {
+      0: { Sun: { 1: "c-l1" } },
+      1: { Sun: { 1: "c-l2-a" } },
+      2: { Sun: { 1: "c-l2-b" } },
+    };
+
+    const resolutions = autoResolveMustMoves(
+      localAssignments,
+      localCourses,
+      localStudents,
+      new Set(["c-l1", "c-l2-a", "c-l2-b"]),
+      getT("en"),
+      localHomerooms
+    );
+
+    const destinations = Object.values(resolutions).map((entry) => Object.values(entry)[0]);
+    const sameGradeCount = destinations.filter((roomId) => roomId === 1).length;
+    const crossGradeCount = destinations.filter((roomId) => roomId === 2).length;
+
+    expect(sameGradeCount).toBe(2);
+    expect(crossGradeCount).toBe(2);
+  });
+
+  it("clusters auto-moves into fewer rooms before opening another destination", () => {
+    const localHomerooms: Homeroom[] = [
+      { id: 0, name: "Room 101", grade: 10, capacity: 30 },
+      { id: 1, name: "Room 102", grade: 10, capacity: 3 },
+      { id: 2, name: "Room 103", grade: 10, capacity: 3 },
+    ];
+
+    const localCourses: Course[] = [
+      {
+        id: "c-l1",
+        subject: "kammi",
+        level: "L1",
+        grade: null,
+        segment: null,
+        teacherName: "T1",
+        startTime: "07:45",
+        meetings: [{ day: "Sun", slot: 1 }],
+        pattern: "Sun",
+      },
+      {
+        id: "c-l2-a",
+        subject: "kammi",
+        level: "L2",
+        grade: null,
+        segment: null,
+        teacherName: "T2",
+        startTime: "07:45",
+        meetings: [{ day: "Sun", slot: 1 }],
+        pattern: "Sun",
+      },
+      {
+        id: "c-l2-b",
+        subject: "kammi",
+        level: "L2",
+        grade: null,
+        segment: null,
+        teacherName: "T3",
+        startTime: "07:45",
+        meetings: [{ day: "Sun", slot: 1 }],
+        pattern: "Sun",
+      },
+    ];
+
+    const localStudents: Student[] = Array.from({ length: 5 }, (_, index) => ({
+      id: `s${index + 1}`,
+      name: `Student ${index + 1}`,
+      homeroom: 0,
+      grade: 10,
+      doneQ: false,
+      done: { kammi: false, lafthi: false, esl: false },
+      needs: { kammi: "L2", lafthi: "L1", esl: "L1" },
+      strength: 0.5,
+    }));
+
+    const localAssignments: Assignments = {
+      0: { Sun: { 1: "c-l1" } },
+      1: { Sun: { 1: "c-l2-a" } },
+      2: { Sun: { 1: "c-l2-b" } },
+    };
+
+    const resolutions = autoResolveMustMoves(
+      localAssignments,
+      localCourses,
+      localStudents,
+      new Set(["c-l1", "c-l2-a", "c-l2-b"]),
+      getT("en"),
+      localHomerooms
+    );
+
+    const destinations = Object.values(resolutions).map((entry) => Object.values(entry)[0]);
+    const roomOneCount = destinations.filter((roomId) => roomId === 1).length;
+    const roomTwoCount = destinations.filter((roomId) => roomId === 2).length;
+
+    expect(roomOneCount).toBe(3);
+    expect(roomTwoCount).toBe(2);
   });
 });
