@@ -42,6 +42,7 @@ The Vite `base` is derived from `GITHUB_REPOSITORY`, so it works on project page
 ## Project structure
 
 - `src/AppV6.tsx`: main UX shell and orchestration
+- `docs/prototype-logic-and-assumptions.md`: workflow logic and product assumptions behind the prototype
 - `src/domain/constants.ts`: static domain constants
 - `src/domain/data.ts`: seeded mock data + stream-group builder
 - `src/domain/rules.ts`: matching and labeling rules
