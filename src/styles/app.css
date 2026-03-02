@@ -997,6 +997,7 @@ body {
 
 .cell.empty {
   background: #FAFAF7;
+  cursor: default;
 }
 
 .cell.empty:hover {

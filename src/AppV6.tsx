@@ -624,6 +624,10 @@ export default function AppV6() {
     const seen = new Set<string>();
     const roomCapacity = HOMEROOMS[selectedRoom].capacity;
     const roomPrepG12Students = students.filter((student) => student.homeroom === selectedRoom && student.grade === 12 && !student.doneQ);
+    const offlineSlots = DAYS.reduce((sum, day) => {
+      return sum + SLOTS.filter((slot) => !getAssignment(assignments, selectedRoom, day, slot.id)).length;
+    }, 0);
+    flags.push(fmt("roomFlagOfflineSlots", { count: offlineSlots }));
 
     for (const day of DAYS) {
       for (const slot of SLOTS) {
@@ -1255,17 +1259,13 @@ export default function AppV6() {
                             key={`${day}-${slot.id}`}
                             className={cx("cell", !assignment && "empty", selected && "sel")}
                             onClick={() => {
-                              if (!campusWhitelist) return;
-                              if (!assignment) setPicker({ day, slotId: slot.id, mode: "add" });
-                              else setSidePanel(selected ? null : { day, slotId: slot.id });
+                              if (!campusWhitelist || !assignment) return;
+                              setSidePanel(selected ? null : { day, slotId: slot.id });
                             }}
                           >
                             {!assignment && (
                               <div className="ci-e">
-                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                                  <path d="M12 5v14M5 12h14" />
-                                </svg>
-                                <span>{t.pickCourse}</span>
+                                <span>{t.offlineCourseSlot}</span>
                               </div>
                             )}
 
