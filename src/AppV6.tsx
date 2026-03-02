@@ -381,6 +381,7 @@ export default function AppV6() {
   );
 
   const step2Ready = step2Complete;
+  const step2AutoResolved = step2Ready && step2DecisionOfferings.length === 0 && step2UnavailableOfferings.length === 0;
 
   const campusFlowComplete = step0Complete && step1Complete && step2Ready;
   const hasStep1Progress = useMemo(() => LEVELED_SUBJECTS.some((subject) => Boolean(selectedStreams[subject])), [selectedStreams]);
@@ -410,12 +411,12 @@ export default function AppV6() {
       setStep2Collapsed(false);
       return;
     }
-    if (step2Ready) {
+    if (step2Ready && !step2AutoResolved) {
       setStep2Collapsed(true);
     } else {
       setStep2Collapsed(false);
     }
-  }, [activeCampusStep, step2Ready]);
+  }, [activeCampusStep, step2Ready, step2AutoResolved]);
 
   useEffect(() => {
     if (page !== "campus") return;
@@ -1043,7 +1044,9 @@ export default function AppV6() {
 
                         <div className="step-inline-note">
                           {step1Complete
-                            ? t.readyForStep2
+                            ? step2AutoResolved
+                              ? t.step2AutoResolvedFromStep1
+                              : t.readyForStep2
                             : fmt("step1ProgressLine", { selected: selectedStreamCount, total: LEVELED_SUBJECTS.length })}
                         </div>
                         <div className="step-actions">
@@ -1057,7 +1060,9 @@ export default function AppV6() {
                     {activeCampusStep === 2 && !step2Collapsed && (
                       <div className="card step-focus">
                         <div className="card-t">{t.step2}</div>
-                        <div className="step-inline-note" style={{ marginBottom: 10 }}>{t.step2DecisionOnlyHint}</div>
+                        <div className="step-inline-note" style={{ marginBottom: 10 }}>
+                          {step2AutoResolved ? t.step2AutoResolvedHint : t.step2DecisionOnlyHint}
+                        </div>
 
                         {GRADES.map((grade) => {
                           const subjects = GRADE_SUBJECTS[grade].all;
