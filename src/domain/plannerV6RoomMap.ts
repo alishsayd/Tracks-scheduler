@@ -1,4 +1,5 @@
 import { LEVELS, SUBJECTS } from "./constants";
+import { PLANNING_ROOM_CAPACITY, pickDestinationByGradeAndLoad } from "./plannerPolicy";
 import type { Assignments, Course, Day, Homeroom, LeveledSubject, Level, StreamGroup, Student } from "./types";
 import type { RoomHost, RoomMapPreview, RoomMapRow, RoomMapSummary, SubjectRoutingPlan } from "./plannerV6Core";
 
@@ -220,12 +221,12 @@ export function buildRoomMapPreview(
   for (const level of levelsRunning) {
     const demand = remap.effective[level];
     if (demand > 0) {
-      roomsNeeded[level] = Math.max(1, Math.ceil(demand / 22));
+      roomsNeeded[level] = Math.max(1, Math.ceil(demand / PLANNING_ROOM_CAPACITY));
       targetRooms += roomsNeeded[level];
     }
   }
 
-  const overflowFor = (level: Level, rooms: number) => Math.max(0, remap.effective[level] - rooms * 22);
+  const overflowFor = (level: Level, rooms: number) => Math.max(0, remap.effective[level] - rooms * PLANNING_ROOM_CAPACITY);
 
   while (targetRooms > hostCandidates.length) {
     const reducible = levelsRunning
@@ -245,8 +246,8 @@ export function buildRoomMapPreview(
 
         if (aOverflowAfter !== bOverflowAfter) return aOverflowAfter - bOverflowAfter;
 
-        const aSpareAfter = (aCurrentRooms - 1) * 22 - remap.effective[a];
-        const bSpareAfter = (bCurrentRooms - 1) * 22 - remap.effective[b];
+        const aSpareAfter = (aCurrentRooms - 1) * PLANNING_ROOM_CAPACITY - remap.effective[a];
+        const bSpareAfter = (bCurrentRooms - 1) * PLANNING_ROOM_CAPACITY - remap.effective[b];
         if (aSpareAfter !== bSpareAfter) return bSpareAfter - aSpareAfter;
 
         if (aCurrentRooms !== bCurrentRooms) return bCurrentRooms - aCurrentRooms;
@@ -298,28 +299,14 @@ export function buildRoomMapPreview(
   }
 
   const pickDestinationRoom = (candidateRooms: Homeroom[], studentGrade: number) => {
-    const scored = candidateRooms.map((room) => ({
+    const ranked = candidateRooms.map((room) => ({
       room,
       current: assignedCounts[room.id] ?? 0,
       sameGrade: room.grade === studentGrade,
+      tieBreaker: room.id,
+      option: room,
     }));
-
-    const byLoad = (left: { room: Homeroom; current: number }, right: { room: Homeroom; current: number }) => {
-      if (left.current !== right.current) return left.current - right.current;
-      return left.room.id - right.room.id;
-    };
-
-    const leastSame = scored.filter((entry) => entry.sameGrade).sort(byLoad)[0];
-    const leastOther = scored.filter((entry) => !entry.sameGrade).sort(byLoad)[0];
-
-    if (leastSame && leastOther) {
-      // Prefer same-grade while keeping receiving-room rosters balanced.
-      return leastSame.current <= leastOther.current ? leastSame.room : leastOther.room;
-    }
-
-    if (leastSame) return leastSame.room;
-    if (leastOther) return leastOther.room;
-    return null;
+    return pickDestinationByGradeAndLoad(ranked);
   };
 
   const placements: Record<string, number> = {};

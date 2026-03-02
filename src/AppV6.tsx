@@ -3,52 +3,18 @@ import { DAYS, GRADE_SUBJECTS, GRADES, LEVELS, SLOTS, SUBJECTS } from "./domain/
 import { buildHomerooms, getRuntimeAdminConfig } from "./domain/adminConfig";
 import { buildStreamGroups, genCourses, genStudents } from "./domain/data";
 import { formatDayPattern, getDayLabel, getSubjectLabelFromT, getT, localizePersonName, localizeRoomName } from "./domain/i18n";
-import {
-  autoResolveMustMoves,
-  buildCampusWhitelist,
-  computeMovement,
-  getAssignment,
-  scheduleStats,
-  type GradeCourseSelections,
-  type SelectedStreams,
-} from "./domain/planner";
-import {
-  buildRoomMapPreview,
-  levelOpenFromRouting,
-  type RoomHost,
-} from "./domain/plannerV6";
-import { courseLabel, courseMatchesStudent } from "./domain/rules";
+import { getAssignment, scheduleStats } from "./domain/planner";
+import type { RoomHost } from "./domain/plannerV6";
+import { courseLabel } from "./domain/rules";
 import type {
-  Assignments,
-  Course,
   Day,
   Lang,
-  MoveModalState,
-  MoveResolutions,
-  SidePanelState,
   SubjectKey,
   TabPage,
-  LeveledSubject,
 } from "./domain/types";
-import {
-  buildLeveledBlockersByGrade,
-  canSatisfyRequiredGradeWideSubjects,
-  isMeetingBlockedByLeveled,
-  LEVELED_SUBJECTS,
-  type PreFlightIssue,
-  type Step0Decision,
-  buildBaseDemandBySubject,
-  buildLevelPolicyBySubject,
-  buildRoomsTotalBySubject,
-  buildRoutingPlans,
-  buildStep0Issues,
-  buildStep1Issues,
-  buildStep2OptionsBySubject,
-  findSubjectsWithoutRunningLevels,
-  meetingKey,
-  sameGradeCourseSelections,
-} from "./appv6/campusFlow";
-import { buildCampusAssignments } from "./appv6/applyCampusPlan";
+import { LEVELED_SUBJECTS } from "./appv6/campusFlow";
+import { useCampusFlow } from "./appv6/useCampusFlow";
+import { useHomeroomMovement } from "./appv6/useHomeroomMovement";
 import "./styles/app.css";
 
 const ADMIN_CONFIG = getRuntimeAdminConfig();
@@ -85,331 +51,57 @@ export default function AppV6() {
   const [students] = useState(INIT_STUDENTS);
   const [courses] = useState(INIT_COURSES);
 
-  const [assignments, setAssignments] = useState<Assignments>({});
-  const [moveResolutions, setMoveResolutions] = useState<MoveResolutions>({});
-
   const [page, setPage] = useState<TabPage>("campus");
   const [selectedRoom, setSelectedRoom] = useState(0);
 
-  const [sidePanel, setSidePanel] = useState<SidePanelState | null>(null);
-  const [moveModal, setMoveModal] = useState<MoveModalState | null>(null);
-
-  const [selectedStreams, setSelectedStreams] = useState<SelectedStreams>({});
-  const [step0Decisions, setStep0Decisions] = useState<Partial<Record<string, Step0Decision>>>({});
-  const [hostOverrides, setHostOverrides] = useState<Record<LeveledSubject, Partial<Record<number, RoomHost>>>>({
-    kammi: {},
-    lafthi: {},
-    esl: {},
+  const {
+    assignments,
+    moveResolutions,
+    setMoveResolutions,
+    selectedStreams,
+    step0Decisions,
+    gradeCourseSelections,
+    campusWhitelist,
+    activeCampusStep,
+    step2Collapsed,
+    setActiveCampusStep,
+    setStep2Collapsed,
+    step0Issues,
+    step0IssueCount,
+    step0ResolvedIssueCount,
+    subjectsWithoutRunningLevels,
+    step0Complete,
+    routingPlans,
+    computedWhitelist,
+    subjectPreviews,
+    step1EnabledStreamIds,
+    selectedStreamCount,
+    step1Issues,
+    step1Complete,
+    step2OptionsBySubject,
+    step2DecisionOfferings,
+    step2UnavailableOfferings,
+    selectedDecisionOfferings,
+    step2Ready,
+    step2AutoResolved,
+    campusFlowComplete,
+    homeroomEnabled,
+    jumpBackToStep,
+    applyCampusPlan,
+    setIssueDecision,
+    pickStream,
+    setHostForRoom,
+    selectGradeCourse,
+  } = useCampusFlow({
+    students,
+    courses,
+    homerooms: HOMEROOMS,
+    streamGroups: STREAM_GROUPS,
+    t,
+    fmt,
+    page,
+    setPage,
   });
-  const [gradeCourseSelections, setGradeCourseSelections] = useState<GradeCourseSelections>({});
-  const [campusWhitelist, setCampusWhitelist] = useState<Set<string> | null>(null);
-  const [activeCampusStep, setActiveCampusStep] = useState<0 | 1 | 2>(0);
-  const [step2Collapsed, setStep2Collapsed] = useState(false);
-  const [planRevision, setPlanRevision] = useState(0);
-  const [appliedPlanRevision, setAppliedPlanRevision] = useState(-1);
-
-  const getCourse = useCallback((courseId: string) => courses.find((course) => course.id === courseId), [courses]);
-  const streamGroupById = useMemo(() => new Map(STREAM_GROUPS.map((group) => [group.id, group])), []);
-  const streamGroupsBySubject = useMemo(
-    () => ({
-      kammi: STREAM_GROUPS.filter((group) => group.subject === "kammi"),
-      lafthi: STREAM_GROUPS.filter((group) => group.subject === "lafthi"),
-      esl: STREAM_GROUPS.filter((group) => group.subject === "esl"),
-    }),
-    []
-  );
-
-  const baseDemandBySubject = useMemo(() => buildBaseDemandBySubject(students), [students]);
-
-  const roomsTotalBySubject = useMemo(() => buildRoomsTotalBySubject(HOMEROOMS), []);
-
-  const step0Issues = useMemo(
-    () => buildStep0Issues(baseDemandBySubject, roomsTotalBySubject),
-    [baseDemandBySubject, roomsTotalBySubject]
-  );
-
-  useEffect(() => {
-    const validIds = new Set(step0Issues.map((issue) => issue.id));
-    setStep0Decisions((prev) => {
-      const next: Partial<Record<string, Step0Decision>> = {};
-      for (const [key, value] of Object.entries(prev)) {
-        if (!validIds.has(key)) continue;
-        next[key] = value;
-      }
-      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
-    });
-  }, [step0Issues]);
-
-  const step0IssueCount = step0Issues.length;
-  const step0ResolvedIssueCount = useMemo(
-    () => step0Issues.filter((issue) => Boolean(step0Decisions[issue.id])).length,
-    [step0Issues, step0Decisions]
-  );
-
-  const levelPolicyBySubject = useMemo(
-    () => buildLevelPolicyBySubject(baseDemandBySubject, step0Issues, step0Decisions),
-    [baseDemandBySubject, step0Issues, step0Decisions]
-  );
-
-  const subjectsWithoutRunningLevels = useMemo(
-    () => findSubjectsWithoutRunningLevels(baseDemandBySubject, levelPolicyBySubject),
-    [baseDemandBySubject, levelPolicyBySubject]
-  );
-
-  const step0Complete = useMemo(() => {
-    const allIssuesResolved = step0IssueCount === 0 || step0ResolvedIssueCount === step0IssueCount;
-    return allIssuesResolved && subjectsWithoutRunningLevels.length === 0;
-  }, [step0IssueCount, step0ResolvedIssueCount, subjectsWithoutRunningLevels.length]);
-
-  const routingPlans = useMemo(
-    () => buildRoutingPlans(baseDemandBySubject, levelPolicyBySubject),
-    [baseDemandBySubject, levelPolicyBySubject]
-  );
-
-  const policyLevelOpen = useMemo(() => levelOpenFromRouting(routingPlans), [routingPlans]);
-
-  const computedWhitelist = useMemo(
-    () => buildCampusWhitelist(selectedStreams, gradeCourseSelections, policyLevelOpen, STREAM_GROUPS),
-    [selectedStreams, gradeCourseSelections, policyLevelOpen]
-  );
-
-  const subjectPreviews = useMemo(() => {
-    const previews: Partial<Record<LeveledSubject, ReturnType<typeof buildRoomMapPreview>>> = {};
-
-    for (const subject of LEVELED_SUBJECTS) {
-      const streamId = selectedStreams[subject];
-      if (!streamId) continue;
-      const group = STREAM_GROUPS.find((entry) => entry.id === streamId);
-      if (!group) continue;
-      previews[subject] = buildRoomMapPreview(subject, group, routingPlans[subject], students, HOMEROOMS, hostOverrides[subject]);
-    }
-
-    return previews;
-  }, [selectedStreams, routingPlans, students, hostOverrides]);
-
-  const step1EnabledStreamIds = useMemo(() => {
-    const enabled: Record<LeveledSubject, Set<string>> = {
-      kammi: new Set<string>(),
-      lafthi: new Set<string>(),
-      esl: new Set<string>(),
-    };
-    const feasibilityCache = new Map<string, boolean>();
-
-    const selectionKey = (selection: SelectedStreams) =>
-      LEVELED_SUBJECTS.map((subject) => `${subject}:${selection[subject] || "-"}`).join("|");
-
-    const buildPreviewsForSelection = (selection: SelectedStreams) => {
-      const previews: Partial<Record<LeveledSubject, ReturnType<typeof buildRoomMapPreview>>> = {};
-
-      for (const subject of LEVELED_SUBJECTS) {
-        const streamId = selection[subject];
-        if (!streamId) return null;
-        const group = streamGroupById.get(streamId);
-        if (!group || group.subject !== subject) return null;
-        previews[subject] = buildRoomMapPreview(subject, group, routingPlans[subject], students, HOMEROOMS, hostOverrides[subject]);
-      }
-
-      return previews;
-    };
-
-    const isStep2FeasibleForSelection = (selection: SelectedStreams) => {
-      const previews = buildPreviewsForSelection(selection);
-      if (!previews) return false;
-      const blockers = buildLeveledBlockersByGrade(selection, previews, STREAM_GROUPS, HOMEROOMS);
-      return canSatisfyRequiredGradeWideSubjects(courses, blockers);
-    };
-
-    const canCompleteWithSelection = (selection: SelectedStreams): boolean => {
-      const key = selectionKey(selection);
-      const cached = feasibilityCache.get(key);
-      if (cached !== undefined) return cached;
-
-      const missingSubjects = LEVELED_SUBJECTS.filter((subject) => !selection[subject]).sort(
-        (left, right) => streamGroupsBySubject[left].length - streamGroupsBySubject[right].length
-      );
-
-      let feasible = false;
-      if (missingSubjects.length === 0) {
-        feasible = isStep2FeasibleForSelection(selection);
-      } else {
-        const nextSubject = missingSubjects[0];
-        feasible = streamGroupsBySubject[nextSubject].some((group) =>
-          canCompleteWithSelection({
-            ...selection,
-            [nextSubject]: group.id,
-          })
-        );
-      }
-
-      feasibilityCache.set(key, feasible);
-      return feasible;
-    };
-
-    for (const subject of LEVELED_SUBJECTS) {
-      for (const group of streamGroupsBySubject[subject]) {
-        const candidate: SelectedStreams = {
-          ...selectedStreams,
-          [subject]: group.id,
-        };
-        if (canCompleteWithSelection(candidate)) {
-          enabled[subject].add(group.id);
-        }
-      }
-    }
-
-    return enabled;
-  }, [selectedStreams, streamGroupById, streamGroupsBySubject, routingPlans, students, hostOverrides, courses]);
-
-  const selectedStreamCount = useMemo(() => LEVELED_SUBJECTS.filter((subject) => Boolean(selectedStreams[subject])).length, [selectedStreams]);
-
-  const step1Issues = useMemo(
-    () => buildStep1Issues(selectedStreams, subjectPreviews, t, fmt),
-    [selectedStreams, subjectPreviews, t, fmt]
-  );
-
-  const step1SelectionFeasible = useMemo(() => {
-    return LEVELED_SUBJECTS.every((subject) => {
-      const streamId = selectedStreams[subject];
-      if (!streamId) return false;
-      return step1EnabledStreamIds[subject].has(streamId);
-    });
-  }, [selectedStreams, step1EnabledStreamIds]);
-
-  const step1Complete = useMemo(() => {
-    return LEVELED_SUBJECTS.every((subject) => step1Issues[subject].length === 0) && step1SelectionFeasible;
-  }, [step1Issues, step1SelectionFeasible]);
-
-  const requiredGradeOfferings = useMemo(() => {
-    const required: Array<{ grade: number; subject: SubjectKey }> = [];
-    for (const grade of GRADES) {
-      for (const subject of GRADE_SUBJECTS[grade].all as SubjectKey[]) {
-        const hasOptions = courses.some((course) => course.grade === grade && course.subject === subject);
-        if (hasOptions) required.push({ grade, subject });
-      }
-    }
-    return required;
-  }, [courses]);
-
-  const leveledBlockersByGrade = useMemo(
-    () => buildLeveledBlockersByGrade(selectedStreams, subjectPreviews, STREAM_GROUPS, HOMEROOMS),
-    [selectedStreams, subjectPreviews]
-  );
-
-  const meetingBlockedByLeveled = useCallback(
-    (grade: number, course: Course, meeting: { day: Day; slot: number }) =>
-      isMeetingBlockedByLeveled(leveledBlockersByGrade, grade, course, meeting),
-    [leveledBlockersByGrade]
-  );
-
-  const step2OptionsBySubject = useMemo(
-    () => buildStep2OptionsBySubject(courses, gradeCourseSelections, meetingBlockedByLeveled),
-    [courses, gradeCourseSelections, meetingBlockedByLeveled]
-  );
-
-  useEffect(() => {
-    setGradeCourseSelections((prev) => {
-      const next: GradeCourseSelections = {};
-
-      for (const grade of GRADES) {
-        const cleaned: Partial<Record<SubjectKey, string | undefined>> = {};
-
-        for (const subject of GRADE_SUBJECTS[grade].all as SubjectKey[]) {
-          const state = step2OptionsBySubject[grade]?.[subject];
-          if (!state || state.unavailable) continue;
-
-          if (state.fixedCourseId) {
-            cleaned[subject] = state.fixedCourseId;
-            continue;
-          }
-
-          const selectedCourseId = prev[grade]?.[subject];
-          if (!selectedCourseId) continue;
-          const stillValid = state.validOptions.some((option) => option.id === selectedCourseId);
-          if (!stillValid) continue;
-          cleaned[subject] = selectedCourseId;
-        }
-
-        if (Object.keys(cleaned).length > 0) {
-          next[grade] = cleaned;
-        }
-      }
-
-      return sameGradeCourseSelections(prev, next) ? prev : next;
-    });
-  }, [step2OptionsBySubject]);
-
-  const step2DecisionOfferings = useMemo(
-    () =>
-      requiredGradeOfferings.filter(({ grade, subject }) => {
-        const state = step2OptionsBySubject[grade]?.[subject];
-        return Boolean(state?.decisionRequired);
-      }),
-    [requiredGradeOfferings, step2OptionsBySubject]
-  );
-
-  const step2UnavailableOfferings = useMemo(
-    () =>
-      requiredGradeOfferings.filter(({ grade, subject }) => {
-        const state = step2OptionsBySubject[grade]?.[subject];
-        return Boolean(state?.unavailable);
-      }),
-    [requiredGradeOfferings, step2OptionsBySubject]
-  );
-
-  const selectedDecisionOfferings = useMemo(
-    () =>
-      step2DecisionOfferings.filter(({ grade, subject }) => {
-        const selectedId = gradeCourseSelections[grade]?.[subject];
-        if (!selectedId) return false;
-        const state = step2OptionsBySubject[grade]?.[subject];
-        return Boolean(state?.validOptions.some((option) => option.id === selectedId));
-      }).length,
-    [step2DecisionOfferings, gradeCourseSelections, step2OptionsBySubject]
-  );
-
-  const step2Complete = useMemo(
-    () => step2UnavailableOfferings.length === 0 && selectedDecisionOfferings === step2DecisionOfferings.length,
-    [step2UnavailableOfferings.length, selectedDecisionOfferings, step2DecisionOfferings.length]
-  );
-
-  const step2Ready = step2Complete;
-  const step2AutoResolved = step2Ready && step2DecisionOfferings.length === 0 && step2UnavailableOfferings.length === 0;
-
-  const campusFlowComplete = step0Complete && step1Complete && step2Ready;
-  const homeroomEnabled = campusFlowComplete && campusWhitelist !== null && appliedPlanRevision === planRevision;
-  const hasStep1Progress = useMemo(() => LEVELED_SUBJECTS.some((subject) => Boolean(selectedStreams[subject])), [selectedStreams]);
-  const hasStep2Progress = useMemo(
-    () => Object.values(gradeCourseSelections).some((selection) => Object.values(selection || {}).some((courseId) => Boolean(courseId))),
-    [gradeCourseSelections]
-  );
-
-  useEffect(() => {
-    if (!step0Complete && activeCampusStep !== 0) {
-      setActiveCampusStep(0);
-      return;
-    }
-    if (step0Complete && !step1Complete && activeCampusStep === 2) {
-      setActiveCampusStep(1);
-    }
-  }, [step0Complete, step1Complete, activeCampusStep]);
-
-  useEffect(() => {
-    if (activeCampusStep === 0 && step0IssueCount === 0 && step0Complete) {
-      setActiveCampusStep(1);
-    }
-  }, [activeCampusStep, step0IssueCount, step0Complete]);
-
-  useEffect(() => {
-    if (activeCampusStep !== 2) {
-      setStep2Collapsed(false);
-      return;
-    }
-    if (step2Ready && !step2AutoResolved) {
-      setStep2Collapsed(true);
-    } else {
-      setStep2Collapsed(false);
-    }
-  }, [activeCampusStep, step2Ready, step2AutoResolved]);
 
   useEffect(() => {
     if (page !== "campus") return;
@@ -419,293 +111,35 @@ export default function AppV6() {
     }
   }, [activeCampusStep, page]);
 
-  useEffect(() => {
-    if (!homeroomEnabled && page === "homeroom") {
-      setPage("campus");
-    }
-  }, [homeroomEnabled, page]);
-
-  const markPlanDirty = useCallback(() => {
-    setPlanRevision((prev) => prev + 1);
-  }, []);
-
-  const resetFromStep0 = useCallback(() => {
-    setSelectedStreams({});
-    setHostOverrides({ kammi: {}, lafthi: {}, esl: {} });
-    setGradeCourseSelections({});
-    setCampusWhitelist(null);
-    setAssignments({});
-    setMoveResolutions({});
-    setStep2Collapsed(false);
-  }, []);
-
-  const resetFromStep1 = useCallback(() => {
-    setGradeCourseSelections({});
-    setCampusWhitelist(null);
-    setAssignments({});
-    setMoveResolutions({});
-    setStep2Collapsed(false);
-  }, []);
-
-  const jumpBackToStep = useCallback(
-    (target: 0 | 1) => {
-      if (target === 0) {
-        if ((hasStep1Progress || hasStep2Progress || campusWhitelist) && !window.confirm(t.confirmBackToStep0)) {
-          return;
-        }
-        resetFromStep0();
-        setPage("campus");
-        setActiveCampusStep(0);
-        return;
-      }
-
-      if ((hasStep2Progress || campusWhitelist) && !window.confirm(t.confirmBackToStep1)) {
-        return;
-      }
-      resetFromStep1();
-      setPage("campus");
-      setActiveCampusStep(1);
-    },
-    [hasStep1Progress, hasStep2Progress, campusWhitelist, resetFromStep0, resetFromStep1, t]
-  );
-
-  const applyCampusPlan = useCallback(() => {
-    if (!step2Ready) {
-      setPage("campus");
-      return;
-    }
-
-    const whitelist = new Set(computedWhitelist);
-    setCampusWhitelist(whitelist);
-
-    const { assignments: nextAssignments } = buildCampusAssignments({
-      whitelist,
-      selectedStreams,
-      subjectPreviews,
-      gradeCourseSelections,
-      courses,
-      homerooms: HOMEROOMS,
-      streamGroups: STREAM_GROUPS,
-    });
-
-    const autoResolvedMoves = autoResolveMustMoves(nextAssignments, courses, students, whitelist, t, HOMEROOMS);
-    setMoveResolutions(autoResolvedMoves);
-    setAssignments(nextAssignments);
-    setAppliedPlanRevision(planRevision);
-    setStep2Collapsed(true);
-    setPage("homeroom");
-  }, [step2Ready, computedWhitelist, selectedStreams, subjectPreviews, gradeCourseSelections, courses, students, t, planRevision]);
-
-  const setIssueDecision = useCallback((issue: PreFlightIssue, decision: Step0Decision) => {
-    markPlanDirty();
-    setStep0Decisions((prev) => ({
-      ...prev,
-      [issue.id]: decision,
-    }));
-    setHostOverrides((prev) => ({ ...prev, [issue.subject]: {} }));
-  }, [markPlanDirty]);
-
-  const pickStream = useCallback((subject: LeveledSubject, streamGroupId: string) => {
-    markPlanDirty();
-    setSelectedStreams((prev) => ({ ...prev, [subject]: streamGroupId }));
-    setHostOverrides((prev) => ({ ...prev, [subject]: {} }));
-  }, [markPlanDirty]);
-
-  const setHostForRoom = useCallback((subject: LeveledSubject, roomId: number, host: RoomHost) => {
-    markPlanDirty();
-    setHostOverrides((prev) => ({
-      ...prev,
-      [subject]: {
-        ...(prev[subject] || {}),
-        [roomId]: host,
-      },
-    }));
-  }, [markPlanDirty]);
-
-  const computeMovementForCell = useCallback(
-    (roomId: number, day: Day, slotId: number) =>
-      computeMovement(roomId, day, slotId, assignments, courses, students, moveResolutions, campusWhitelist, t, HOMEROOMS),
-    [assignments, courses, students, moveResolutions, campusWhitelist, t]
-  );
-
-  const computeMustMoveRosterForCell = useCallback(
-    (roomId: number, day: Day, slotId: number) => {
-      const baseline = computeMovement(roomId, day, slotId, assignments, courses, students, {}, campusWhitelist, t, HOMEROOMS);
-      if (!baseline.blockKey) {
-        return { blockKey: "", mustMoveOut: [] as ReturnType<typeof computeMovement>["mustMoveOut"] };
-      }
-
-      const withDestinations = baseline.mustMoveOut.map((student) => ({
-        ...student,
-        resolved: moveResolutions?.[student.id]?.[baseline.blockKey],
-      }));
-
-      return {
-        blockKey: baseline.blockKey,
-        mustMoveOut: withDestinations,
-      };
-    },
-    [assignments, courses, students, campusWhitelist, t, moveResolutions]
-  );
-
-  const resolveMove = useCallback((studentId: string, blockKey: string, destination: number) => {
-    setMoveResolutions((prev) => ({
-      ...prev,
-      [studentId]: {
-        ...(prev[studentId] || {}),
-        [blockKey]: destination,
-      },
-    }));
-    setMoveModal(null);
-  }, []);
+  const {
+    sidePanel,
+    setSidePanel,
+    moveModal,
+    setMoveModal,
+    resolveMove,
+    sidePanelData,
+    manualOverrideOptions,
+    roomFlags,
+    openManualMoveModal,
+    computeMovementForCell,
+    getCourse,
+  } = useHomeroomMovement({
+    assignments,
+    courses,
+    students,
+    moveResolutions,
+    setMoveResolutions,
+    campusWhitelist,
+    selectedRoom,
+    homerooms: HOMEROOMS,
+    t,
+    lang,
+    fmt,
+    subjectLabel,
+    roomLabel,
+  });
 
   const stats = useMemo(() => scheduleStats(assignments, HOMEROOMS), [assignments]);
-
-  const sidePanelData = useMemo(() => {
-    if (!sidePanel) return null;
-    const assignment = getAssignment(assignments, selectedRoom, sidePanel.day, sidePanel.slotId);
-    if (!assignment) return null;
-    const course = getCourse(assignment);
-    if (!course) return null;
-    const movement = computeMovementForCell(selectedRoom, sidePanel.day, sidePanel.slotId);
-    const mustMoveRoster = computeMustMoveRosterForCell(selectedRoom, sidePanel.day, sidePanel.slotId);
-    return {
-      course,
-      movement,
-      blockKey: movement.blockKey || mustMoveRoster.blockKey,
-      mustMoveOutRoster: mustMoveRoster.mustMoveOut,
-    };
-  }, [sidePanel, selectedRoom, assignments, getCourse, computeMovementForCell, computeMustMoveRosterForCell]);
-
-  const buildManualOverrideOptions = useCallback(
-    (day: Day, slotId: number, sourceRoomId: number) => {
-      const options: Array<{ roomId: number; courseId: string }> = [];
-      for (const room of HOMEROOMS) {
-        if (room.id === sourceRoomId) continue;
-        const courseId = getAssignment(assignments, room.id, day, slotId);
-        if (!courseId) continue;
-        if (campusWhitelist && !campusWhitelist.has(courseId)) continue;
-        options.push({ roomId: room.id, courseId });
-      }
-      return options;
-    },
-    [assignments, campusWhitelist]
-  );
-
-  const manualOverrideOptions = useMemo(() => {
-    if (!sidePanel) return [];
-    return buildManualOverrideOptions(sidePanel.day, sidePanel.slotId, selectedRoom);
-  }, [sidePanel, selectedRoom, buildManualOverrideOptions]);
-
-  const roomFlags = useMemo(() => {
-    if (!campusWhitelist) return [];
-    const flags: string[] = [];
-    const seen = new Set<string>();
-    const roomCapacity = HOMEROOMS[selectedRoom].capacity;
-    const roomPrepG12Students = students.filter((student) => student.homeroom === selectedRoom && student.grade === 12 && !student.doneQ);
-    const offlineSlots = DAYS.reduce((sum, day) => {
-      return sum + SLOTS.filter((slot) => !getAssignment(assignments, selectedRoom, day, slot.id)).length;
-    }, 0);
-    flags.push(fmt("roomFlagOfflineSlots", { count: offlineSlots }));
-
-    for (const day of DAYS) {
-      for (const slot of SLOTS) {
-        const assignment = getAssignment(assignments, selectedRoom, day, slot.id);
-        if (!assignment) continue;
-        const course = getCourse(assignment);
-        if (!course) continue;
-
-        const movement = computeMovementForCell(selectedRoom, day, slot.id);
-        if (movement.forcedStay.length > 0) {
-          const reason = movement.forcedStay[0]?.reason ? ` (${movement.forcedStay[0].reason})` : "";
-          const line = fmt("roomFlagForcedStay", { count: movement.forcedStay.length, course: courseLabel(course, lang), reason });
-          if (!seen.has(line)) {
-            seen.add(line);
-            flags.push(line);
-          }
-        }
-
-        if (movement.effectiveHere > roomCapacity) {
-          const line = fmt("roomFlagRosterOverflow", { course: courseLabel(course, lang), count: movement.effectiveHere });
-          if (!seen.has(line)) {
-            seen.add(line);
-            flags.push(line);
-          }
-        }
-
-        if (SUBJECTS[course.subject].tahsili && roomPrepG12Students.length > 0) {
-          const qudratCoursesInSlot = HOMEROOMS
-            .map((room) => {
-              const candidateId = getAssignment(assignments, room.id, day, slot.id);
-              if (!candidateId) return null;
-              const candidate = getCourse(candidateId);
-              if (!candidate || SUBJECTS[candidate.subject].qudrat !== true) return null;
-              return candidate;
-            })
-            .filter(Boolean) as Course[];
-
-          if (qudratCoursesInSlot.length > 0) {
-            const subjectsInSlot = Array.from(new Set(qudratCoursesInSlot.map((entry) => entry.subject))).filter(
-              (entry): entry is "kammi" | "lafthi" => entry === "kammi" || entry === "lafthi"
-            );
-            const unmetByNeed = new Map<string, number>();
-            let unmetGeneric = 0;
-
-            for (const student of roomPrepG12Students) {
-              const hasQudratOption = qudratCoursesInSlot.some((candidate) => courseMatchesStudent(candidate, student));
-              if (hasQudratOption) continue;
-
-              if (subjectsInSlot.length === 1) {
-                const qSubject = subjectsInSlot[0];
-                const qLevel = student.needs[qSubject];
-                const key = `${qSubject}|${qLevel}`;
-                unmetByNeed.set(key, (unmetByNeed.get(key) || 0) + 1);
-              } else {
-                unmetGeneric += 1;
-              }
-            }
-
-            unmetByNeed.forEach((count, key) => {
-              const [qSubject, qLevel] = key.split("|");
-              const line = fmt("roomFlagQudratLevelClosed", {
-                count,
-                subject: subjectLabel(qSubject as SubjectKey),
-                level: qLevel,
-              });
-              if (!seen.has(line)) {
-                seen.add(line);
-                flags.push(line);
-              }
-            });
-
-            if (unmetGeneric > 0) {
-              const line = fmt("roomFlagQudratNoCompatible", { count: unmetGeneric });
-              if (!seen.has(line)) {
-                seen.add(line);
-                flags.push(line);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    return flags;
-  }, [campusWhitelist, assignments, selectedRoom, getCourse, computeMovementForCell, lang, fmt, students, subjectLabel, dayLabel, t.slot]);
-
-  const openManualMoveModal = useCallback(
-    (studentId: string) => {
-      if (!sidePanel || !sidePanelData || manualOverrideOptions.length === 0) return;
-      setMoveModal({
-        studentId,
-        day: sidePanel.day,
-        slotId: sidePanel.slotId,
-        options: manualOverrideOptions,
-        blockKey: sidePanelData.blockKey,
-      });
-    },
-    [sidePanel, sidePanelData, manualOverrideOptions]
-  );
 
   return (
     <div dir={dir}>
@@ -1095,14 +529,7 @@ export default function AppV6() {
                                               key={course.id}
                                               className={cx("stream-opt", "step2-stream-opt", picked && "picked")}
                                               onClick={() => {
-                                                markPlanDirty();
-                                                setGradeCourseSelections((prev) => ({
-                                                  ...prev,
-                                                  [grade]: {
-                                                    ...(prev[grade] || {}),
-                                                    [subject]: course.id,
-                                                  },
-                                                }));
+                                                selectGradeCourse(grade, subject, course.id);
                                               }}
                                             >
                                               <div className="so-radio">{picked && <div className="so-dot" />}</div>

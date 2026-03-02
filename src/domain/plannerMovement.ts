@@ -1,5 +1,6 @@
 import { DAYS, SLOTS, SUBJECTS } from "./constants";
 import { getSubjectLabelFromT } from "./i18n";
+import { pickDestinationByGradeAndLoad } from "./plannerPolicy";
 import { blockKeyForCourse, courseMatchesStudent } from "./rules";
 import { getAssignment } from "./plannerCore";
 import type {
@@ -234,25 +235,13 @@ export function autoResolveMustMoves(
     }>;
 
   const pickBestOption = (move: (typeof pending)[number]) => {
-    const scored = scoreOptions(move);
-    if (scored.length === 0) return null;
-
-    const byLoad = (left: { option: { roomId: number }; current: number }, right: { option: { roomId: number }; current: number }) => {
-      if (left.current !== right.current) return left.current - right.current;
-      return left.option.roomId - right.option.roomId;
-    };
-
-    const leastSame = scored.filter((entry) => entry.sameGrade).sort(byLoad)[0];
-    const leastOther = scored.filter((entry) => !entry.sameGrade).sort(byLoad)[0];
-
-    if (leastSame && leastOther) {
-      // Prefer same-grade while keeping receiving-room rosters balanced.
-      return leastSame.current <= leastOther.current ? leastSame.option : leastOther.option;
-    }
-
-    if (leastSame) return leastSame.option;
-    if (leastOther) return leastOther.option;
-    return null;
+    const ranked = scoreOptions(move).map((entry) => ({
+      option: entry.option,
+      current: entry.current,
+      sameGrade: entry.sameGrade,
+      tieBreaker: entry.option.roomId,
+    }));
+    return pickDestinationByGradeAndLoad(ranked);
   };
 
   for (const move of pending) {

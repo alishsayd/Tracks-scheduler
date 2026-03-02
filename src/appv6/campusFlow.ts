@@ -1,11 +1,11 @@
 import { GRADE_SUBJECTS, GRADES, LEVELS, SUBJECTS } from "../domain/constants";
+import { PLANNING_ROOM_CAPACITY, ROOM_PRESSURE_ALWAYS_CONSTRAINED } from "../domain/plannerPolicy";
 import type { RoomMapPreview, SubjectRoutingPlan } from "../domain/plannerV6";
 import { createDefaultSubjectRoutingPlan } from "../domain/plannerV6";
 import type { Course, Day, LeveledSubject, Level, StreamGroup, Student, SubjectKey, Translations } from "../domain/types";
 import type { GradeCourseSelections, SelectedStreams } from "../domain/planner";
 
 export const LEVELED_SUBJECTS = ["lafthi", "kammi", "esl"] as const;
-export const PLANNING_ROOM_CAPACITY = 22;
 
 export type Step0Decision = "RUN" | "CLOSE";
 
@@ -102,15 +102,13 @@ export function buildStep0Issues(
   roomsTotalBySubject: Record<LeveledSubject, number>
 ) {
   const issues: PreFlightIssue[] = [];
-  // v1 assumption from product brief: treat rooms as constrained until spare-room modeling is added.
-  const noSpareRooms = true;
 
   for (const subject of LEVELED_SUBJECTS) {
     const demand = baseDemandBySubject[subject];
     const totalDemand = LEVELS.reduce((sum, level) => sum + demand[level], 0);
     const roomsTotal = roomsTotalBySubject[subject];
     const roomsNeededForSubject = Math.ceil(totalDemand / PLANNING_ROOM_CAPACITY);
-    const roomsConstrained = noSpareRooms || roomsTotal <= roomsNeededForSubject;
+    const roomsConstrained = ROOM_PRESSURE_ALWAYS_CONSTRAINED || roomsTotal <= roomsNeededForSubject;
 
     for (const level of LEVELS) {
       const levelDemand = demand[level];
