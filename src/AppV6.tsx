@@ -112,6 +112,8 @@ export default function AppV6() {
   const [campusWhitelist, setCampusWhitelist] = useState<Set<string> | null>(null);
   const [activeCampusStep, setActiveCampusStep] = useState<0 | 1 | 2>(0);
   const [step2Collapsed, setStep2Collapsed] = useState(false);
+  const [planRevision, setPlanRevision] = useState(0);
+  const [appliedPlanRevision, setAppliedPlanRevision] = useState(-1);
 
   const getCourse = useCallback((courseId: string) => courses.find((course) => course.id === courseId), [courses]);
   const streamGroupById = useMemo(() => new Map(STREAM_GROUPS.map((group) => [group.id, group])), []);
@@ -381,6 +383,7 @@ export default function AppV6() {
   const step2AutoResolved = step2Ready && step2DecisionOfferings.length === 0 && step2UnavailableOfferings.length === 0;
 
   const campusFlowComplete = step0Complete && step1Complete && step2Ready;
+  const homeroomEnabled = campusFlowComplete && campusWhitelist !== null && appliedPlanRevision === planRevision;
   const hasStep1Progress = useMemo(() => LEVELED_SUBJECTS.some((subject) => Boolean(selectedStreams[subject])), [selectedStreams]);
   const hasStep2Progress = useMemo(
     () => Object.values(gradeCourseSelections).some((selection) => Object.values(selection || {}).some((courseId) => Boolean(courseId))),
@@ -424,10 +427,14 @@ export default function AppV6() {
   }, [activeCampusStep, page]);
 
   useEffect(() => {
-    if (!campusFlowComplete && page === "homeroom") {
+    if (!homeroomEnabled && page === "homeroom") {
       setPage("campus");
     }
-  }, [campusFlowComplete, page]);
+  }, [homeroomEnabled, page]);
+
+  const markPlanDirty = useCallback(() => {
+    setPlanRevision((prev) => prev + 1);
+  }, []);
 
   const resetFromStep0 = useCallback(() => {
     setSelectedStreams({});
@@ -491,24 +498,28 @@ export default function AppV6() {
     const autoResolvedMoves = autoResolveMustMoves(nextAssignments, courses, students, whitelist, t, HOMEROOMS);
     setMoveResolutions(autoResolvedMoves);
     setAssignments(nextAssignments);
+    setAppliedPlanRevision(planRevision);
     setStep2Collapsed(true);
     setPage("homeroom");
-  }, [step2Ready, computedWhitelist, selectedStreams, subjectPreviews, gradeCourseSelections, courses, students, t]);
+  }, [step2Ready, computedWhitelist, selectedStreams, subjectPreviews, gradeCourseSelections, courses, students, t, planRevision]);
 
   const setIssueDecision = useCallback((issue: PreFlightIssue, decision: Step0Decision) => {
+    markPlanDirty();
     setStep0Decisions((prev) => ({
       ...prev,
       [issue.id]: decision,
     }));
     setHostOverrides((prev) => ({ ...prev, [issue.subject]: {} }));
-  }, []);
+  }, [markPlanDirty]);
 
   const pickStream = useCallback((subject: LeveledSubject, streamGroupId: string) => {
+    markPlanDirty();
     setSelectedStreams((prev) => ({ ...prev, [subject]: streamGroupId }));
     setHostOverrides((prev) => ({ ...prev, [subject]: {} }));
-  }, []);
+  }, [markPlanDirty]);
 
   const setHostForRoom = useCallback((subject: LeveledSubject, roomId: number, host: RoomHost) => {
+    markPlanDirty();
     setHostOverrides((prev) => ({
       ...prev,
       [subject]: {
@@ -516,7 +527,7 @@ export default function AppV6() {
         [roomId]: host,
       },
     }));
-  }, []);
+  }, [markPlanDirty]);
 
   const assignCourseToRoom = useCallback(
     (roomId: number, courseId: string) => {
@@ -776,9 +787,9 @@ export default function AppV6() {
           </button>
           <button
             className={cx("nt", page === "homeroom" && "on")}
-            disabled={!campusFlowComplete}
+            disabled={!homeroomEnabled}
             onClick={() => {
-              if (!campusFlowComplete) return;
+              if (!homeroomEnabled) return;
               setPage("homeroom");
             }}
           >
@@ -1121,6 +1132,7 @@ export default function AppV6() {
                                               key={course.id}
                                               className={cx("stream-opt", "step2-stream-opt", picked && "picked")}
                                               onClick={() => {
+                                                markPlanDirty();
                                                 setGradeCourseSelections((prev) => ({
                                                   ...prev,
                                                   [grade]: {
