@@ -554,6 +554,26 @@ export default function AppV6() {
     [assignments, courses, students, moveResolutions, campusWhitelist, t]
   );
 
+  const computeMustMoveRosterForCell = useCallback(
+    (roomId: number, day: Day, slotId: number) => {
+      const baseline = computeMovement(roomId, day, slotId, assignments, courses, students, {}, campusWhitelist, t, HOMEROOMS);
+      if (!baseline.blockKey) {
+        return { blockKey: "", mustMoveOut: [] as ReturnType<typeof computeMovement>["mustMoveOut"] };
+      }
+
+      const withDestinations = baseline.mustMoveOut.map((student) => ({
+        ...student,
+        resolved: moveResolutions?.[student.id]?.[baseline.blockKey],
+      }));
+
+      return {
+        blockKey: baseline.blockKey,
+        mustMoveOut: withDestinations,
+      };
+    },
+    [assignments, courses, students, campusWhitelist, t, moveResolutions]
+  );
+
   const resolveMove = useCallback((studentId: string, blockKey: string, destination: number) => {
     setMoveResolutions((prev) => ({
       ...prev,
@@ -578,11 +598,15 @@ export default function AppV6() {
     if (!assignment) return null;
     const course = getCourse(assignment);
     if (!course) return null;
+    const movement = computeMovementForCell(selectedRoom, sidePanel.day, sidePanel.slotId);
+    const mustMoveRoster = computeMustMoveRosterForCell(selectedRoom, sidePanel.day, sidePanel.slotId);
     return {
       course,
-      movement: computeMovementForCell(selectedRoom, sidePanel.day, sidePanel.slotId),
+      movement,
+      blockKey: movement.blockKey || mustMoveRoster.blockKey,
+      mustMoveOutRoster: mustMoveRoster.mustMoveOut,
     };
-  }, [sidePanel, selectedRoom, assignments, getCourse, computeMovementForCell]);
+  }, [sidePanel, selectedRoom, assignments, getCourse, computeMovementForCell, computeMustMoveRosterForCell]);
 
   const buildManualOverrideOptions = useCallback(
     (day: Day, slotId: number, sourceRoomId: number) => {
@@ -704,7 +728,7 @@ export default function AppV6() {
         day: sidePanel.day,
         slotId: sidePanel.slotId,
         options: manualOverrideOptions,
-        blockKey: sidePanelData.movement.blockKey,
+        blockKey: sidePanelData.blockKey,
       });
     },
     [sidePanel, sidePanelData, manualOverrideOptions]
@@ -1410,49 +1434,39 @@ export default function AppV6() {
                 </div>
 
                 <div className="sp-sec">
-                  <div className="sp-st">🔴 {t.mustMoveOut} <span className="sp-cnt">{sidePanelData.movement.mustMoveOut.length}</span></div>
-                  {sidePanelData.movement.mustMoveOut.length === 0 ? (
+                  <div className="sp-st">🔴 {t.mustMoveOut} <span className="sp-cnt">{sidePanelData.mustMoveOutRoster.length}</span></div>
+                  {sidePanelData.mustMoveOutRoster.length === 0 ? (
                     <div style={{ fontSize: 12, color: "#94908A" }}>—</div>
                   ) : (
-                    sidePanelData.movement.mustMoveOut.map((student) => (
+                    sidePanelData.mustMoveOutRoster.map((student) => (
                       <div key={student.id} className="sr">
                         <span className="sr-n">{personLabel(student.name)}</span>
                         <span className="sr-g">{t.grade} {student.grade}</span>
                         <span className="sr-lv" style={{ background: "#FEF3C7", color: "#B45309" }}>{student.neededLabel}</span>
-                        {student.resolved !== undefined && student.resolved !== null ? (
-                          <button
-                            className="sr-btn ok"
-                            onClick={() =>
-                              setMoveModal({
-                                studentId: student.id,
-                                day: sidePanel.day,
-                                slotId: sidePanel.slotId,
-                                options: student.options,
-                                blockKey: sidePanelData.movement.blockKey,
+                        <span className="sr-r" style={student.resolved === undefined || student.resolved === null ? { color: "#B45309", fontWeight: 700 } : undefined}>
+                          {student.resolved !== undefined && student.resolved !== null
+                            ? fmt("mustMoveDestinationSet", {
+                                room: (() => {
+                                  const resolved = HOMEROOMS.find((room) => room.id === student.resolved);
+                                  return resolved ? roomLabel(resolved.name) : t.unknown;
+                                })(),
                               })
-                            }
-                          >
-                            → {(() => {
-                              const resolved = HOMEROOMS.find((room) => room.id === student.resolved);
-                              return resolved ? roomLabel(resolved.name) : "";
-                            })()}
-                          </button>
-                        ) : (
-                          <button
-                            className="sr-btn"
-                            onClick={() =>
-                              setMoveModal({
-                                studentId: student.id,
-                                day: sidePanel.day,
-                                slotId: sidePanel.slotId,
-                                options: student.options,
-                                blockKey: sidePanelData.movement.blockKey,
-                              })
-                            }
-                          >
-                            {t.destination}
-                          </button>
-                        )}
+                            : t.mustMoveDestinationMissing}
+                        </span>
+                        <button
+                          className="sr-btn"
+                          onClick={() =>
+                            setMoveModal({
+                              studentId: student.id,
+                              day: sidePanel.day,
+                              slotId: sidePanel.slotId,
+                              options: student.options,
+                              blockKey: sidePanelData.blockKey,
+                            })
+                          }
+                        >
+                          {t.moveAction}
+                        </button>
                       </div>
                     ))
                   )}
