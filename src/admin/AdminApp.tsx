@@ -95,8 +95,7 @@ export function AdminApp() {
 
   const canApply = validation.errors.length === 0;
   const base = import.meta.env.BASE_URL || "/";
-  const schedulerHref = base;
-  const schedulerV6Href = `${base}Tracks-scheduler1/`;
+  const schedulerHref = `${base}Tracks-scheduler1/`;
 
   const setRoomCount = (value: number) => {
     setDraft((prev) => ({
@@ -147,7 +146,7 @@ export function AdminApp() {
   const apply = () => {
     if (!canApply) return;
     saveAdminConfig(draft);
-    setNotice("Saved. Refresh /Tracks-scheduler to apply these settings.");
+    setNotice("Saved. Refresh the scheduler page to apply these settings.");
   };
 
   const reset = () => {
@@ -167,9 +166,6 @@ export function AdminApp() {
         <div style={{ display: "flex", gap: 8 }}>
           <a className="admin-link" href={schedulerHref}>
             Open Scheduler
-          </a>
-          <a className="admin-link" href={schedulerV6Href}>
-            Open Scheduler v6
           </a>
         </div>
       </header>

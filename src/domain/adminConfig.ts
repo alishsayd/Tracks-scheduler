@@ -119,26 +119,6 @@ function clampPercent(value: unknown, fallback: number) {
   return n;
 }
 
-function normalizeToHundred(values: [number, number, number]): [number, number, number] {
-  const total = values[0] + values[1] + values[2];
-  if (total <= 0) return [0, 0, 100];
-
-  const normalized = values.map((value) => (value / total) * 100);
-  const floored = normalized.map((value) => Math.floor(value));
-  let remainder = 100 - (floored[0] + floored[1] + floored[2]);
-
-  const order = normalized
-    .map((value, index) => ({ index, fraction: value - floored[index] }))
-    .sort((a, b) => b.fraction - a.fraction);
-
-  for (let i = 0; i < order.length && remainder > 0; i += 1) {
-    floored[order[i].index] += 1;
-    remainder -= 1;
-  }
-
-  return [floored[0], floored[1], floored[2]];
-}
-
 function normalizeLevelDistribution(raw: any, fallback: LevelDistribution): LevelDistribution {
   const l1 = clampPercent(raw?.L1, fallback.L1);
   const l2 = clampPercent(raw?.L2, fallback.L2);
@@ -146,13 +126,6 @@ function normalizeLevelDistribution(raw: any, fallback: LevelDistribution): Leve
   const sum = l1 + l2 + l3;
 
   if (sum === 100) return { L1: l1, L2: l2, L3: l3 };
-
-  // Migrate legacy rows where L1/L2/L3 + done = 100.
-  const legacyDone = raw && Object.prototype.hasOwnProperty.call(raw, "done") ? clampPercent(raw.done, 0) : null;
-  if (legacyDone !== null && sum > 0 && sum + legacyDone === 100) {
-    const [n1, n2, n3] = normalizeToHundred([l1, l2, l3]);
-    return { L1: n1, L2: n2, L3: n3 };
-  }
 
   return cloneLevelDistribution(fallback);
 }
@@ -174,24 +147,16 @@ function normalizeConfig(raw: unknown): AdminConfig {
     12: Math.max(0, asInt(gradeTotalsRaw[12], defaults.gradeTotals[12])),
   };
 
-  const legacyQDone = (grade: AdminGrade) => {
-    const fromKammi = subjectRaw?.kammi?.[grade]?.done;
-    const fromLafthi = subjectRaw?.lafthi?.[grade]?.done;
-    return clampPercent(fromKammi ?? fromLafthi, defaults.doneRates.qudrat[grade]);
-  };
-
-  const legacyEslDone = (grade: AdminGrade) => clampPercent(subjectRaw?.esl?.[grade]?.done, defaults.doneRates.esl[grade]);
-
   const doneRates: DoneRates = {
     qudrat: {
-      10: clampPercent(doneRaw?.qudrat?.[10], legacyQDone(10)),
-      11: clampPercent(doneRaw?.qudrat?.[11], legacyQDone(11)),
-      12: clampPercent(doneRaw?.qudrat?.[12], legacyQDone(12)),
+      10: clampPercent(doneRaw?.qudrat?.[10], defaults.doneRates.qudrat[10]),
+      11: clampPercent(doneRaw?.qudrat?.[11], defaults.doneRates.qudrat[11]),
+      12: clampPercent(doneRaw?.qudrat?.[12], defaults.doneRates.qudrat[12]),
     },
     esl: {
-      10: clampPercent(doneRaw?.esl?.[10], legacyEslDone(10)),
-      11: clampPercent(doneRaw?.esl?.[11], legacyEslDone(11)),
-      12: clampPercent(doneRaw?.esl?.[12], legacyEslDone(12)),
+      10: clampPercent(doneRaw?.esl?.[10], defaults.doneRates.esl[10]),
+      11: clampPercent(doneRaw?.esl?.[11], defaults.doneRates.esl[11]),
+      12: clampPercent(doneRaw?.esl?.[12], defaults.doneRates.esl[12]),
     },
   };
 
