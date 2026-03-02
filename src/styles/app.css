@@ -558,6 +558,10 @@ body {
   background: #ecfdf5;
 }
 
+.step2-stream-opt {
+  margin-bottom: 0;
+}
+
 .so-radio {
   width: 16px;
   height: 16px;
@@ -624,6 +628,42 @@ body {
 .bundle-teacher {
   flex: 1;
   font-weight: 800;
+}
+
+.step2-subject-block {
+  margin-bottom: 14px;
+}
+
+.step2-subject-title {
+  font-size: 12px;
+  font-weight: 900;
+  margin-bottom: 6px;
+}
+
+.step2-option-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #6B665F;
+  font-weight: 700;
+}
+
+.step2-fixed-opt {
+  border: 1px solid #DCEEE6;
+  border-radius: 8px;
+  background: #F4FCF8;
+  padding: 8px 10px;
+}
+
+.step2-fixed-line {
+  font-size: 11px;
+  font-weight: 800;
+  color: #0E7F5F;
+}
+
+.step2-fixed-meta {
+  margin-top: 4px;
+  font-size: 10px;
+  color: #6B665F;
 }
 
 .grade-course-row {
