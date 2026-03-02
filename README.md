@@ -11,7 +11,7 @@ Homeroom-first stream planner prototype rebuilt as a maintainable React + TypeSc
    - `npm run dev`
 4. Open pages
    - Scheduler: `http://localhost:5173/`
-   - Scheduler v6: `http://localhost:5173/Tracks-scheduler1/`
+   - Scheduler alias: `http://localhost:5173/Tracks-scheduler1/`
    - Admin: `http://localhost:5173/admin/`
 
 ## Test
@@ -41,7 +41,7 @@ The Vite `base` is derived from `GITHUB_REPOSITORY`, so it works on project page
 
 ## Project structure
 
-- `src/App.tsx`: main UX shell and orchestration
+- `src/AppV6.tsx`: main UX shell and orchestration
 - `src/domain/constants.ts`: static domain constants
 - `src/domain/data.ts`: seeded mock data + stream-group builder
 - `src/domain/rules.ts`: matching and labeling rules

@@ -1,15 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildHomerooms, getDefaultAdminConfig } from "./adminConfig";
-import { buildStreamGroups, genCourses, genStudents } from "./data";
+import { buildStreamGroups, genCourses } from "./data";
 import { courseMatchesStudent } from "./rules";
-import { autoResolveMustMoves, buildCampusWhitelist, demandSnapshot, seedAssignmentsFromCampusPlan, unresolvedMoves } from "./planner";
+import { autoResolveMustMoves, unresolvedMoves } from "./planner";
 import { getT } from "./i18n";
 import type { Assignments, Course, Homeroom, Student } from "./types";
-import type { LevelOpenState, SelectedStreams } from "./planner";
-
-const adminConfig = getDefaultAdminConfig();
-const homerooms = buildHomerooms(adminConfig);
-const students = genStudents(homerooms, adminConfig);
 const courses = genCourses();
 const streamGroups = buildStreamGroups(courses);
 
@@ -41,31 +35,77 @@ describe("stream planner domain", () => {
   });
 
   it("deduplicates unresolved moves by student + blockKey", () => {
-    const selectedStreams: SelectedStreams = {
-      kammi: streamGroups.find((group) => group.subject === "kammi")?.id,
-      lafthi: streamGroups.find((group) => group.subject === "lafthi")?.id,
-      esl: streamGroups.find((group) => group.subject === "esl")?.id,
+    const localHomerooms: Homeroom[] = [
+      { id: 0, name: "Room 101", grade: 10, capacity: 22 },
+      { id: 1, name: "Room 102", grade: 10, capacity: 22 },
+      { id: 2, name: "Room 103", grade: 10, capacity: 22 },
+    ];
+    const localCourses: Course[] = [
+      {
+        id: "c-l1",
+        subject: "kammi",
+        level: "L1",
+        grade: null,
+        segment: null,
+        teacherName: "T1",
+        startTime: "07:45",
+        meetings: [
+          { day: "Sun", slot: 1 },
+          { day: "Mon", slot: 1 },
+        ],
+        pattern: "Sun/Mon",
+      },
+      {
+        id: "c-l2-a",
+        subject: "kammi",
+        level: "L2",
+        grade: null,
+        segment: null,
+        teacherName: "T2",
+        startTime: "07:45",
+        meetings: [
+          { day: "Sun", slot: 1 },
+          { day: "Mon", slot: 1 },
+        ],
+        pattern: "Sun/Mon",
+      },
+      {
+        id: "c-l2-b",
+        subject: "kammi",
+        level: "L2",
+        grade: null,
+        segment: null,
+        teacherName: "T3",
+        startTime: "07:45",
+        meetings: [
+          { day: "Sun", slot: 1 },
+          { day: "Mon", slot: 1 },
+        ],
+        pattern: "Sun/Mon",
+      },
+    ];
+    const localStudents: Student[] = Array.from({ length: 2 }, (_, index) => ({
+      id: `s${index + 1}`,
+      name: `Student ${index + 1}`,
+      homeroom: 0,
+      grade: 10,
+      doneQ: false,
+      done: { kammi: false, lafthi: false, esl: false },
+      needs: { kammi: "L2", lafthi: "L1", esl: "L1" },
+      strength: 0.5,
+    }));
+    const localAssignments: Assignments = {
+      0: { Sun: { 1: "c-l1" }, Mon: { 1: "c-l1" } },
+      1: { Sun: { 1: "c-l2-a" }, Mon: { 1: "c-l2-a" } },
+      2: { Sun: { 1: "c-l2-b" }, Mon: { 1: "c-l2-b" } },
     };
 
-    const levelOpen: LevelOpenState = {
-      kammi: { L1: true, L2: true, L3: true },
-      lafthi: { L1: true, L2: true, L3: true },
-      esl: { L1: true, L2: true, L3: true },
-    };
-
-    const gradeCourseSelections = {};
-    const whitelist = buildCampusWhitelist(selectedStreams, gradeCourseSelections, levelOpen, streamGroups);
-    const assignments = seedAssignmentsFromCampusPlan(whitelist, selectedStreams, levelOpen, gradeCourseSelections, students, courses, streamGroups, homerooms);
-
-    const unresolved = unresolvedMoves(assignments, courses, students, {}, whitelist, getT("en"), homerooms);
+    const whitelist = new Set(["c-l1", "c-l2-a", "c-l2-b"]);
+    const unresolved = unresolvedMoves(localAssignments, localCourses, localStudents, {}, whitelist, getT("en"), localHomerooms);
     const keys = new Set(unresolved.map((row) => `${row.id}|${row.blockKey}`));
 
     expect(unresolved.length).toBe(keys.size);
-  });
-
-  it("produces demand snapshot totals", () => {
-    const snapshot = demandSnapshot(students);
-    expect(snapshot.doneQ + snapshot.stillQ).toBe(students.length);
+    expect(unresolved).toHaveLength(2);
   });
 
   it("prefers same-grade move destinations before cross-grade rooms", () => {

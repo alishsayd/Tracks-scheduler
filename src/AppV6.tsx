@@ -16,12 +16,9 @@ import {
   type SelectedStreams,
 } from "./domain/planner";
 import {
-  autoAssignTahsiliForQudrat,
   buildRoomMapPreview,
-  createDefaultSubjectRoutingPlan,
   levelOpenFromRouting,
   type RoomHost,
-  type SubjectRoutingPlan,
 } from "./domain/plannerV6";
 import { courseLabel, courseMatchesStudent } from "./domain/rules";
 import type {
@@ -36,8 +33,24 @@ import type {
   SubjectKey,
   TabPage,
   LeveledSubject,
-  Level,
 } from "./domain/types";
+import {
+  LEVELED_SUBJECTS,
+  type ConflictFlag,
+  type PreFlightIssue,
+  type Step0Decision,
+  buildBaseDemandBySubject,
+  buildLevelPolicyBySubject,
+  buildRoomsTotalBySubject,
+  buildRoutingPlans,
+  buildStep0Issues,
+  buildStep1Issues,
+  buildStep2OptionsBySubject,
+  findSubjectsWithoutRunningLevels,
+  meetingKey,
+  sameGradeCourseSelections,
+} from "./appv6/campusFlow";
+import { buildCampusAssignments } from "./appv6/applyCampusPlan";
 import "./styles/app.css";
 
 const ADMIN_CONFIG = getRuntimeAdminConfig();
@@ -45,82 +58,9 @@ const HOMEROOMS = buildHomerooms(ADMIN_CONFIG);
 const INIT_STUDENTS = genStudents(HOMEROOMS, ADMIN_CONFIG);
 const INIT_COURSES = genCourses();
 const STREAM_GROUPS = buildStreamGroups(INIT_COURSES);
-const LEVELED_SUBJECTS = ["lafthi", "kammi", "esl"] as const;
-const PLANNING_ROOM_CAPACITY = 22;
 
 function cx(...parts: Array<string | boolean | null | undefined>) {
   return parts.filter(Boolean).join(" ");
-}
-
-function meetingKey(day: Day, slot: number) {
-  return `${day}|${slot}`;
-}
-
-function toMeetingKeys(meetings: Array<{ day: Day; slot: number }>) {
-  return meetings.map((meeting) => meetingKey(meeting.day, meeting.slot));
-}
-
-function defaultRoutingPlans(): Record<LeveledSubject, SubjectRoutingPlan> {
-  return {
-    kammi: createDefaultSubjectRoutingPlan(),
-    lafthi: createDefaultSubjectRoutingPlan(),
-    esl: createDefaultSubjectRoutingPlan(),
-  };
-}
-
-type Step0Decision = "RUN" | "CLOSE";
-
-interface PreFlightIssue {
-  id: string;
-  subject: LeveledSubject;
-  level: Level;
-  levelDemand: number;
-  totalDemand: number;
-  roomsTotal: number;
-  roomsRemainingIfRun: number;
-  remainingDemandIfRun: number;
-  avgIfRun: number;
-  avgIfClose: number;
-  closeMergeTarget: "L2" | "L1+L3";
-  closeTargetCount: number;
-  closeSplit?: { toL1: number; toL3: number };
-  closeSplitTargetCounts?: { L1: number; L3: number };
-}
-
-interface LevelPolicyEntry {
-  status: Step0Decision;
-  mergeTargetLevel: "L2" | "L1+L3" | null;
-  movedStudentsCount: number;
-  roomCost: 0 | 1;
-}
-
-interface ConflictFlag {
-  roomId: number;
-  day: Day;
-  slotId: number;
-  previousCourseId: string;
-  nextCourseId: string;
-}
-
-interface Step2SubjectOptionState {
-  grade: number;
-  subject: SubjectKey;
-  options: Course[];
-  validOptions: Course[];
-  decisionRequired: boolean;
-  fixedCourseId: string | null;
-  unavailable: boolean;
-}
-
-function sameGradeCourseSelections(a: GradeCourseSelections, b: GradeCourseSelections) {
-  for (const grade of GRADES) {
-    for (const subject of GRADE_SUBJECTS[grade].all as SubjectKey[]) {
-      const left = a[grade]?.[subject] || null;
-      const right = b[grade]?.[subject] || null;
-      if (left !== right) return false;
-    }
-  }
-  return true;
 }
 
 export default function AppV6() {
@@ -175,97 +115,14 @@ export default function AppV6() {
 
   const getCourse = useCallback((courseId: string) => courses.find((course) => course.id === courseId), [courses]);
 
-  const baseDemandBySubject = useMemo(() => {
-    const counts: Record<LeveledSubject, Record<Level, number>> = {
-      kammi: { L1: 0, L2: 0, L3: 0 },
-      lafthi: { L1: 0, L2: 0, L3: 0 },
-      esl: { L1: 0, L2: 0, L3: 0 },
-    };
+  const baseDemandBySubject = useMemo(() => buildBaseDemandBySubject(students), [students]);
 
-    for (const student of students) {
-      for (const subject of LEVELED_SUBJECTS) {
-        if (student.done[subject]) continue;
-        counts[subject][student.needs[subject]] += 1;
-      }
-    }
+  const roomsTotalBySubject = useMemo(() => buildRoomsTotalBySubject(HOMEROOMS), []);
 
-    return counts;
-  }, [students]);
-
-  const roomsTotalBySubject = useMemo(
-    () =>
-      ({
-        kammi: HOMEROOMS.filter((room) => room.grade !== 12).length,
-        lafthi: HOMEROOMS.filter((room) => room.grade !== 12).length,
-        esl: HOMEROOMS.length,
-      }) as Record<LeveledSubject, number>,
-    []
+  const step0Issues = useMemo(
+    () => buildStep0Issues(baseDemandBySubject, roomsTotalBySubject),
+    [baseDemandBySubject, roomsTotalBySubject]
   );
-
-  const step0Issues = useMemo(() => {
-    const issues: PreFlightIssue[] = [];
-    // v1 assumption from product brief: treat rooms as constrained until spare-room modeling is added.
-    const noSpareRooms = true;
-
-    for (const subject of LEVELED_SUBJECTS) {
-      const demand = baseDemandBySubject[subject];
-      const totalDemand = LEVELS.reduce((sum, level) => sum + demand[level], 0);
-      const roomsTotal = roomsTotalBySubject[subject];
-      const roomsNeededForSubject = Math.ceil(totalDemand / PLANNING_ROOM_CAPACITY);
-      const roomsConstrained = noSpareRooms || roomsTotal <= roomsNeededForSubject;
-
-      for (const level of LEVELS) {
-        const levelDemand = demand[level];
-        const underfilled = levelDemand > 0 && levelDemand < PLANNING_ROOM_CAPACITY * 0.5;
-        if (!underfilled || !roomsConstrained) continue;
-
-        const remainingDemandIfRun = Math.max(0, totalDemand - levelDemand);
-        const roomsRemainingIfRun = Math.max(0, roomsTotal - 1);
-        const avgIfRun = roomsRemainingIfRun > 0 ? remainingDemandIfRun / roomsRemainingIfRun : remainingDemandIfRun;
-        const avgIfClose = roomsTotal > 0 ? totalDemand / roomsTotal : totalDemand;
-
-        if (level === "L2") {
-          const toL1 = Math.floor(levelDemand / 2);
-          const toL3 = Math.max(0, levelDemand - toL1);
-          issues.push({
-            id: `${subject}|${level}`,
-            subject,
-            level,
-            levelDemand,
-            totalDemand,
-            roomsTotal,
-            roomsRemainingIfRun,
-            remainingDemandIfRun,
-            avgIfRun,
-            avgIfClose,
-            closeMergeTarget: "L1+L3",
-            closeTargetCount: 0,
-            closeSplit: { toL1, toL3 },
-            closeSplitTargetCounts: { L1: demand.L1 + toL1, L3: demand.L3 + toL3 },
-          });
-          continue;
-        }
-
-        const targetLevel: "L2" = "L2";
-        issues.push({
-          id: `${subject}|${level}`,
-          subject,
-          level,
-          levelDemand,
-          totalDemand,
-          roomsTotal,
-          roomsRemainingIfRun,
-          remainingDemandIfRun,
-          avgIfRun,
-          avgIfClose,
-          closeMergeTarget: targetLevel,
-          closeTargetCount: demand[targetLevel] + levelDemand,
-        });
-      }
-    }
-
-    return issues;
-  }, [baseDemandBySubject, roomsTotalBySubject]);
 
   useEffect(() => {
     const validIds = new Set(step0Issues.map((issue) => issue.id));
@@ -285,57 +142,13 @@ export default function AppV6() {
     [step0Issues, step0Decisions]
   );
 
-  const levelPolicyBySubject = useMemo(() => {
-    const next: Record<LeveledSubject, Record<Level, LevelPolicyEntry>> = {
-      kammi: {
-        L1: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
-        L2: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
-        L3: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
-      },
-      lafthi: {
-        L1: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
-        L2: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
-        L3: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
-      },
-      esl: {
-        L1: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
-        L2: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
-        L3: { status: "CLOSE", mergeTargetLevel: null, movedStudentsCount: 0, roomCost: 0 },
-      },
-    };
-
-    const issueByKey = new Map(step0Issues.map((issue) => [issue.id, issue]));
-
-    for (const subject of LEVELED_SUBJECTS) {
-      const demand = baseDemandBySubject[subject];
-
-      for (const level of LEVELS) {
-        const levelDemand = demand[level];
-        const issue = issueByKey.get(`${subject}|${level}`);
-        const decision = issue ? step0Decisions[issue.id] : undefined;
-        const status: Step0Decision = levelDemand === 0 ? "CLOSE" : decision || "RUN";
-        const movedStudentsCount = status === "CLOSE" ? levelDemand : 0;
-        const mergeTargetLevel = status === "CLOSE" ? (level === "L2" ? "L1+L3" : "L2") : null;
-
-        next[subject][level] = {
-          status,
-          mergeTargetLevel,
-          movedStudentsCount,
-          roomCost: status === "RUN" ? 1 : 0,
-        };
-      }
-    }
-
-    return next;
-  }, [baseDemandBySubject, step0Issues, step0Decisions]);
+  const levelPolicyBySubject = useMemo(
+    () => buildLevelPolicyBySubject(baseDemandBySubject, step0Issues, step0Decisions),
+    [baseDemandBySubject, step0Issues, step0Decisions]
+  );
 
   const subjectsWithoutRunningLevels = useMemo(
-    () =>
-      LEVELED_SUBJECTS.filter((subject) => {
-        const totalDemand = LEVELS.reduce((sum, level) => sum + baseDemandBySubject[subject][level], 0);
-        if (totalDemand === 0) return false;
-        return LEVELS.every((level) => levelPolicyBySubject[subject][level].status === "CLOSE");
-      }),
+    () => findSubjectsWithoutRunningLevels(baseDemandBySubject, levelPolicyBySubject),
     [baseDemandBySubject, levelPolicyBySubject]
   );
 
@@ -344,49 +157,10 @@ export default function AppV6() {
     return allIssuesResolved && subjectsWithoutRunningLevels.length === 0;
   }, [step0IssueCount, step0ResolvedIssueCount, subjectsWithoutRunningLevels.length]);
 
-  const routingPlans = useMemo<Record<LeveledSubject, SubjectRoutingPlan>>(() => {
-    const plans = defaultRoutingPlans();
-
-    for (const subject of LEVELED_SUBJECTS) {
-      const policy = levelPolicyBySubject[subject];
-      const demand = baseDemandBySubject[subject];
-
-      for (const level of LEVELS) {
-        plans[subject].run[level] = policy[level].status === "RUN" && demand[level] > 0;
-      }
-
-      if (policy.L1.status === "CLOSE" && demand.L1 > 0) {
-        const target: Level = plans[subject].run.L2 ? "L2" : "L3";
-        plans[subject].forceMove.L1 = { target, count: demand.L1 };
-      } else {
-        plans[subject].forceMove.L1 = { target: "L2", count: 0 };
-      }
-
-      if (policy.L3.status === "CLOSE" && demand.L3 > 0) {
-        const target: Level = plans[subject].run.L2 ? "L2" : "L1";
-        plans[subject].forceMove.L3 = { target, count: demand.L3 };
-      } else {
-        plans[subject].forceMove.L3 = { target: "L2", count: 0 };
-      }
-
-      if (policy.L2.status === "CLOSE" && demand.L2 > 0) {
-        if (plans[subject].run.L1 && plans[subject].run.L3) {
-          const toL1 = Math.floor(demand.L2 / 2);
-          plans[subject].forceMove.L2 = { toL1, toL3: demand.L2 - toL1 };
-        } else if (plans[subject].run.L1) {
-          plans[subject].forceMove.L2 = { toL1: demand.L2, toL3: 0 };
-        } else if (plans[subject].run.L3) {
-          plans[subject].forceMove.L2 = { toL1: 0, toL3: demand.L2 };
-        } else {
-          plans[subject].forceMove.L2 = { toL1: 0, toL3: 0 };
-        }
-      } else {
-        plans[subject].forceMove.L2 = { toL1: 0, toL3: 0 };
-      }
-    }
-
-    return plans;
-  }, [baseDemandBySubject, levelPolicyBySubject]);
+  const routingPlans = useMemo(
+    () => buildRoutingPlans(baseDemandBySubject, levelPolicyBySubject),
+    [baseDemandBySubject, levelPolicyBySubject]
+  );
 
   const policyLevelOpen = useMemo(() => levelOpenFromRouting(routingPlans), [routingPlans]);
 
@@ -411,37 +185,10 @@ export default function AppV6() {
 
   const selectedStreamCount = useMemo(() => LEVELED_SUBJECTS.filter((subject) => Boolean(selectedStreams[subject])).length, [selectedStreams]);
 
-  const step1Issues = useMemo(() => {
-    const issues: Record<LeveledSubject, string[]> = {
-      kammi: [],
-      lafthi: [],
-      esl: [],
-    };
-
-    for (const subject of LEVELED_SUBJECTS) {
-      const streamId = selectedStreams[subject];
-      if (!streamId) {
-        issues[subject].push(t.stepIssueSelectBundle);
-        continue;
-      }
-
-      const preview = subjectPreviews[subject];
-      if (!preview) {
-        issues[subject].push(t.stepIssueRoomMapMissing);
-        continue;
-      }
-
-      const hostRows = preview.rows.filter((row) => !row.fixed);
-      for (const level of preview.levelsRunning) {
-        const hasRoom = hostRows.some((row) => row.host === level);
-        if (!hasRoom) {
-          issues[subject].push(fmt("stepIssueMissingLevelRoom", { level }));
-        }
-      }
-    }
-
-    return issues;
-  }, [selectedStreams, subjectPreviews, t, fmt]);
+  const step1Issues = useMemo(
+    () => buildStep1Issues(selectedStreams, subjectPreviews, t, fmt),
+    [selectedStreams, subjectPreviews, t, fmt]
+  );
 
   const step1Complete = useMemo(() => LEVELED_SUBJECTS.every((subject) => step1Issues[subject].length === 0), [step1Issues]);
 
@@ -498,53 +245,10 @@ export default function AppV6() {
     [leveledBlockersByGrade]
   );
 
-  const step2OptionsBySubject = useMemo(() => {
-    const optionState: Record<number, Partial<Record<SubjectKey, Step2SubjectOptionState>>> = {};
-    const courseById = new Map(courses.map((course) => [course.id, course]));
-
-    for (const grade of GRADES) {
-      optionState[grade] = {};
-      const selected = gradeCourseSelections[grade] || {};
-      const selectedBySubject: Partial<Record<SubjectKey, Course>> = {};
-
-      for (const subject of GRADE_SUBJECTS[grade].all as SubjectKey[]) {
-        const selectedId = selected[subject];
-        if (!selectedId) continue;
-        const picked = courseById.get(selectedId);
-        if (!picked) continue;
-        selectedBySubject[subject] = picked;
-      }
-
-      for (const subject of GRADE_SUBJECTS[grade].all as SubjectKey[]) {
-        const options = courses.filter((course) => course.grade === grade && course.subject === subject);
-        if (!options.length) continue;
-
-        const validOptions = options.filter((course) => {
-          if (course.meetings.some((meeting) => meetingBlockedByLeveled(grade, course, meeting))) return false;
-
-          const optionMeetingKeys = new Set(toMeetingKeys(course.meetings));
-          const conflictsWithPicked = Object.entries(selectedBySubject).some(([pickedSubject, pickedCourse]) => {
-            if (!pickedCourse) return false;
-            if (pickedSubject === subject) return false;
-            return pickedCourse.meetings.some((meeting) => optionMeetingKeys.has(meetingKey(meeting.day, meeting.slot)));
-          });
-          return !conflictsWithPicked;
-        });
-
-        optionState[grade][subject] = {
-          grade,
-          subject,
-          options,
-          validOptions,
-          decisionRequired: validOptions.length > 1,
-          fixedCourseId: validOptions.length === 1 ? validOptions[0].id : null,
-          unavailable: validOptions.length === 0,
-        };
-      }
-    }
-
-    return optionState;
-  }, [courses, gradeCourseSelections, meetingBlockedByLeveled]);
+  const step2OptionsBySubject = useMemo(
+    () => buildStep2OptionsBySubject(courses, gradeCourseSelections, meetingBlockedByLeveled),
+    [courses, gradeCourseSelections, meetingBlockedByLeveled]
+  );
 
   useEffect(() => {
     setGradeCourseSelections((prev) => {
@@ -708,77 +412,20 @@ export default function AppV6() {
     const whitelist = new Set(computedWhitelist);
     setCampusWhitelist(whitelist);
 
-    const next: Assignments = {};
-
-    for (const subject of LEVELED_SUBJECTS) {
-      const streamGroupId = selectedStreams[subject];
-      const preview = subjectPreviews[subject];
-      if (!streamGroupId || !preview) continue;
-
-      const group = STREAM_GROUPS.find((entry) => entry.id === streamGroupId);
-      if (!group) continue;
-
-      const levelToCourse: Partial<Record<Level, string>> = {};
-      for (const course of group.courses) {
-        if (!course.level) continue;
-        if (!preview.levelsRunning.includes(course.level)) continue;
-        levelToCourse[course.level] = course.id;
-      }
-
-      for (const room of HOMEROOMS) {
-        const host = preview.hostByRoom[room.id];
-        if (host === "AUTO_TAHSILI") continue;
-        const courseId = levelToCourse[host];
-        if (!courseId || !whitelist.has(courseId)) continue;
-        const course = courses.find((entry) => entry.id === courseId);
-        if (!course) continue;
-        if (!next[room.id]) next[room.id] = {};
-        for (const meeting of course.meetings) {
-          if (!next[room.id][meeting.day]) next[room.id][meeting.day] = {};
-          next[room.id][meeting.day]![meeting.slot] = course.id;
-        }
-      }
-
-      if (SUBJECTS[subject].qudrat) {
-        autoAssignTahsiliForQudrat(next, courses, group, HOMEROOMS);
-      }
-    }
-
-    const conflicts: ConflictFlag[] = [];
-
-    for (const [gradeRaw, selection] of Object.entries(gradeCourseSelections)) {
-      const grade = Number(gradeRaw);
-      const gradeRooms = HOMEROOMS.filter((room) => room.grade === grade);
-
-      for (const courseId of Object.values(selection || {})) {
-        if (!courseId || !whitelist.has(courseId)) continue;
-        const course = courses.find((entry) => entry.id === courseId);
-        if (!course) continue;
-
-        for (const room of gradeRooms) {
-          if (!next[room.id]) next[room.id] = {};
-          for (const meeting of course.meetings) {
-            if (!next[room.id][meeting.day]) next[room.id][meeting.day] = {};
-            const existing = next[room.id][meeting.day]![meeting.slot];
-            if (existing && existing !== course.id) {
-              conflicts.push({
-                roomId: room.id,
-                day: meeting.day,
-                slotId: meeting.slot,
-                previousCourseId: existing,
-                nextCourseId: course.id,
-              });
-            }
-            next[room.id][meeting.day]![meeting.slot] = course.id;
-          }
-        }
-      }
-    }
+    const { assignments: nextAssignments, conflicts } = buildCampusAssignments({
+      whitelist,
+      selectedStreams,
+      subjectPreviews,
+      gradeCourseSelections,
+      courses,
+      homerooms: HOMEROOMS,
+      streamGroups: STREAM_GROUPS,
+    });
 
     setStep2Conflicts(conflicts);
-    const autoResolvedMoves = autoResolveMustMoves(next, courses, students, whitelist, t, HOMEROOMS);
+    const autoResolvedMoves = autoResolveMustMoves(nextAssignments, courses, students, whitelist, t, HOMEROOMS);
     setMoveResolutions(autoResolvedMoves);
-    setAssignments(next);
+    setAssignments(nextAssignments);
     setStep2Collapsed(true);
     setPage("homeroom");
   }, [step2Ready, computedWhitelist, selectedStreams, subjectPreviews, gradeCourseSelections, courses, students, t]);
