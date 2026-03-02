@@ -293,50 +293,33 @@ export function buildRoomMapPreview(
   }
 
   const assignedCounts: Record<number, number> = {};
-  const moveInsByRoom: Record<number, number> = {};
   for (const room of homerooms) {
     assignedCounts[room.id] = 0;
-    moveInsByRoom[room.id] = 0;
   }
 
-  const roomCap = Object.fromEntries(homerooms.map((room) => [room.id, room.capacity])) as Record<number, number>;
   const pickDestinationRoom = (candidateRooms: Homeroom[], studentGrade: number) => {
-    const scored = candidateRooms.map((room) => {
-      const current = assignedCounts[room.id] ?? 0;
-      const remaining = (roomCap[room.id] ?? 0) - current;
-      return {
-        room,
-        current,
-        remaining,
-        clustered: moveInsByRoom[room.id] ?? 0,
-        sameGrade: room.grade === studentGrade,
-      };
-    });
+    const scored = candidateRooms.map((room) => ({
+      room,
+      current: assignedCounts[room.id] ?? 0,
+      sameGrade: room.grade === studentGrade,
+    }));
 
-    const sameGrade = scored.filter((entry) => entry.sameGrade);
-    const sameGradeWithSeats = sameGrade.filter((entry) => entry.remaining > 0);
-    const withSeats = scored.filter((entry) => entry.remaining > 0);
+    const byLoad = (left: { room: Homeroom; current: number }, right: { room: Homeroom; current: number }) => {
+      if (left.current !== right.current) return left.current - right.current;
+      return left.room.id - right.room.id;
+    };
 
-    let pool = scored;
-    if (sameGradeWithSeats.length > 0) {
-      pool = sameGradeWithSeats;
-    } else if (sameGrade.length > 0 && withSeats.length > 0) {
-      // Only mix across grades after same-grade rooms have no available seats.
-      pool = withSeats.filter((entry) => !entry.sameGrade);
-    } else if (sameGrade.length > 0) {
-      pool = sameGrade;
-    } else if (withSeats.length > 0) {
-      pool = withSeats;
+    const leastSame = scored.filter((entry) => entry.sameGrade).sort(byLoad)[0];
+    const leastOther = scored.filter((entry) => !entry.sameGrade).sort(byLoad)[0];
+
+    if (leastSame && leastOther) {
+      // Prefer same-grade while keeping receiving-room rosters balanced.
+      return leastSame.current <= leastOther.current ? leastSame.room : leastOther.room;
     }
 
-    return pool
-      .slice()
-      .sort((a, b) => {
-        if (b.clustered !== a.clustered) return b.clustered - a.clustered;
-        if (b.remaining !== a.remaining) return b.remaining - a.remaining;
-        if (a.current !== b.current) return a.current - b.current;
-        return a.room.id - b.room.id;
-      })[0]?.room;
+    if (leastSame) return leastSame.room;
+    if (leastOther) return leastOther.room;
+    return null;
   };
 
   const placements: Record<string, number> = {};
@@ -389,7 +372,6 @@ export function buildRoomMapPreview(
 
     placements[student.id] = chosen.id;
     assignedCounts[chosen.id] += 1;
-    moveInsByRoom[chosen.id] += 1;
   }
 
   const rows: RoomMapRow[] = homerooms.map((room) => {
