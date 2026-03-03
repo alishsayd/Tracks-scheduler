@@ -60,6 +60,14 @@ function pickLevel(rand: () => number, dist: AdminConfig["subjectDistributions"]
   return pickWeighted(rand, LEVELS, [dist.L1, dist.L2, dist.L3]);
 }
 
+function stableStudentName(room: Homeroom, seatIndex: number, firstNames: string[], lastNames: string[]) {
+  const first = firstNames[(room.id * 5 + seatIndex) % firstNames.length];
+  const last = lastNames[(room.id * 3 + seatIndex) % lastNames.length];
+  const roomCode = room.name.replace(/^Room\s+/i, "R");
+  const seatCode = String(seatIndex + 1).padStart(2, "0");
+  return `${first} ${last} (${roomCode}-${seatCode})`;
+}
+
 export function genStudents(homerooms: Homeroom[], config: AdminConfig) {
   const r = seededRandom(42);
   const first = [
@@ -95,7 +103,7 @@ export function genStudents(homerooms: Homeroom[], config: AdminConfig) {
     const roomCount = roomTargets[hr.id] || 0;
 
     for (let i = 0; i < roomCount; i++) {
-      const name = `${first[(hr.id * 13 + i) % first.length]} ${last[(hr.id * 7 + i) % last.length]}`;
+      const name = stableStudentName(hr, i, first, last);
       const doneQRate = config.doneRates.qudrat[grade] / 100;
       const doneEslRate = config.doneRates.esl[grade] / 100;
       const doneQ = grade === 10 ? false : r() < doneQRate;
