@@ -213,34 +213,46 @@ export function useHomeroomMovement({
   const openManualMoveModal = useCallback(
     (studentId: string) => {
       if (!sidePanel || !sidePanelData || manualOverrideOptions.length === 0) return;
+      const student = students.find((entry) => entry.id === studentId);
+      const filteredOptions = manualOverrideOptions.filter((option) => {
+        if (!student?.doneQ) return true;
+        const course = getCourse(option.courseId);
+        return !course || SUBJECTS[course.subject].qudrat !== true;
+      });
       setMoveModal({
         studentId,
         day: sidePanel.day,
         slotId: sidePanel.slotId,
-        options: manualOverrideOptions,
+        options: filteredOptions,
         blockKey: sidePanelData.blockKey,
       });
     },
-    [sidePanel, sidePanelData, manualOverrideOptions]
+    [sidePanel, sidePanelData, manualOverrideOptions, students, getCourse]
   );
 
   const openMustMoveModal = useCallback(
     (studentId: string, options: Array<{ roomId: number; courseId: string }>) => {
       if (!sidePanel || !sidePanelData) return;
+      const student = students.find((entry) => entry.id === studentId);
       const currentCourseId = getAssignment(assignments, selectedRoom, sidePanel.day, sidePanel.slotId);
       const withStayOption = currentCourseId
         ? [{ roomId: selectedRoom, courseId: currentCourseId }, ...options.filter((option) => option.roomId !== selectedRoom)]
         : options;
+      const filteredOptions = withStayOption.filter((option) => {
+        if (!student?.doneQ) return true;
+        const course = getCourse(option.courseId);
+        return !course || SUBJECTS[course.subject].qudrat !== true;
+      });
 
       setMoveModal({
         studentId,
         day: sidePanel.day,
         slotId: sidePanel.slotId,
-        options: withStayOption,
+        options: filteredOptions,
         blockKey: sidePanelData.blockKey,
       });
     },
-    [sidePanel, sidePanelData, assignments, selectedRoom]
+    [sidePanel, sidePanelData, assignments, selectedRoom, students, getCourse]
   );
 
   return {
