@@ -49,6 +49,20 @@ export function useHomeroomMovement({
   const [moveModal, setMoveModal] = useState<MoveModalState | null>(null);
 
   const getCourse = useCallback((courseId: string) => courses.find((course) => course.id === courseId), [courses]);
+  const studentById = useMemo(() => new Map(students.map((student) => [student.id, student])), [students]);
+
+  const filterOptionsForStudent = useCallback(
+    (studentId: string, options: Array<{ roomId: number; courseId: string }>) => {
+      const student = studentById.get(studentId);
+      if (!student?.doneQ) return options;
+
+      return options.filter((option) => {
+        const course = getCourse(option.courseId);
+        return !course || SUBJECTS[course.subject].qudrat !== true;
+      });
+    },
+    [studentById, getCourse]
+  );
 
   const computeMovementForCell = useCallback(
     (roomId: number, day: Day, slotId: number) =>
@@ -213,12 +227,9 @@ export function useHomeroomMovement({
   const openManualMoveModal = useCallback(
     (studentId: string) => {
       if (!sidePanel || !sidePanelData || manualOverrideOptions.length === 0) return;
-      const student = students.find((entry) => entry.id === studentId);
-      const filteredOptions = manualOverrideOptions.filter((option) => {
-        if (!student?.doneQ) return true;
-        const course = getCourse(option.courseId);
-        return !course || SUBJECTS[course.subject].qudrat !== true;
-      });
+      const filteredOptions = filterOptionsForStudent(studentId, manualOverrideOptions);
+      if (filteredOptions.length === 0) return;
+
       setMoveModal({
         studentId,
         day: sidePanel.day,
@@ -227,22 +238,18 @@ export function useHomeroomMovement({
         blockKey: sidePanelData.blockKey,
       });
     },
-    [sidePanel, sidePanelData, manualOverrideOptions, students, getCourse]
+    [sidePanel, sidePanelData, manualOverrideOptions, filterOptionsForStudent]
   );
 
   const openMustMoveModal = useCallback(
     (studentId: string, options: Array<{ roomId: number; courseId: string }>) => {
       if (!sidePanel || !sidePanelData) return;
-      const student = students.find((entry) => entry.id === studentId);
       const currentCourseId = getAssignment(assignments, selectedRoom, sidePanel.day, sidePanel.slotId);
       const withStayOption = currentCourseId
         ? [{ roomId: selectedRoom, courseId: currentCourseId }, ...options.filter((option) => option.roomId !== selectedRoom)]
         : options;
-      const filteredOptions = withStayOption.filter((option) => {
-        if (!student?.doneQ) return true;
-        const course = getCourse(option.courseId);
-        return !course || SUBJECTS[course.subject].qudrat !== true;
-      });
+      const filteredOptions = filterOptionsForStudent(studentId, withStayOption);
+      if (filteredOptions.length === 0) return;
 
       setMoveModal({
         studentId,
@@ -252,7 +259,15 @@ export function useHomeroomMovement({
         blockKey: sidePanelData.blockKey,
       });
     },
-    [sidePanel, sidePanelData, assignments, selectedRoom, students, getCourse]
+    [sidePanel, sidePanelData, assignments, selectedRoom, filterOptionsForStudent]
+  );
+
+  const canOpenManualMoveModal = useCallback(
+    (studentId: string) => {
+      if (manualOverrideOptions.length === 0) return false;
+      return filterOptionsForStudent(studentId, manualOverrideOptions).length > 0;
+    },
+    [manualOverrideOptions, filterOptionsForStudent]
   );
 
   return {
@@ -266,6 +281,7 @@ export function useHomeroomMovement({
     roomFlags,
     openManualMoveModal,
     openMustMoveModal,
+    canOpenManualMoveModal,
     computeMovementForCell,
     getCourse,
   };

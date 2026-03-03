@@ -116,10 +116,10 @@ export default function AppV6() {
     setMoveModal,
     resolveMove,
     sidePanelData,
-    manualOverrideOptions,
     roomFlags,
     openManualMoveModal,
     openMustMoveModal,
+    canOpenManualMoveModal,
     computeMovementForCell,
     getCourse,
   } = useHomeroomMovement({
@@ -142,13 +142,13 @@ export default function AppV6() {
     (studentId: string) => (
       <button
         className="sr-btn"
-        disabled={manualOverrideOptions.length === 0}
+        disabled={!canOpenManualMoveModal(studentId)}
         onClick={() => openManualMoveModal(studentId)}
       >
         {t.moveAction}
       </button>
     ),
-    [manualOverrideOptions.length, openManualMoveModal, t.moveAction]
+    [canOpenManualMoveModal, openManualMoveModal, t.moveAction]
   );
 
   return (
